@@ -15,6 +15,18 @@ import (
 )
 
 // Pass an Auth subset inside conf.json
+/*    
+    "AuthConf": {
+            "Username": "aqtrans",
+            "Password": "8489",
+            "LdapEnabled": true,
+            "LdapPort": 389,
+            "LdapUrl": "frink.es.gy",
+            "LdapUn": "uid",
+            "LdapOu": "People",
+            "LdapDn": "dc=jba,dc=io"
+    }
+*/
 // Then decode and populate this struct using code from the main app
 type AuthConf struct {
 	Username string
@@ -111,6 +123,7 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			*/
 		case "POST":
+            log.Println(cfg)
 			// Handle login POST request
 			username := template.HTMLEscapeString(r.FormValue("username"))
 			password := template.HTMLEscapeString(r.FormValue("password"))
@@ -207,9 +220,8 @@ func Auth(next http.HandlerFunc) http.HandlerFunc {
 			//w.Write([]byte("OMG"))
 			http.Redirect(w, r, "http://"+r.Host+"/login", 302)
 			return
-		} else {
-			log.Println(username + " is visiting " + r.Referer())
 		}
+		log.Println(username + " is visiting " + r.Referer())
 		next.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(handler)
