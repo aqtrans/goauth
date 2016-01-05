@@ -98,7 +98,7 @@ func GetUsername(r *http.Request) (username string) {
 }
 
 // GET request: serves a 
-func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
+func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 		case "GET":
