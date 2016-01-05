@@ -123,7 +123,7 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 			}
 			*/
 		case "POST":
-            log.Println(cfg)
+            //log.Println(cfg)
 			// Handle login POST request
 			username := template.HTMLEscapeString(r.FormValue("username"))
 			password := template.HTMLEscapeString(r.FormValue("password"))
@@ -135,7 +135,7 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 			//if username == cfg.Username && password == cfg.Password {
 			// Check if LDAP is enabled
 			if cfg.LdapEnabled {
-				if ldapAuth(username, password) || (username == cfg.Username && password == cfg.Password) {	
+				if ldapAuth(cfg, username, password) || (username == cfg.Username && password == cfg.Password) {	
 					SetSession(username, w)
 					log.Println(username + " successfully logged in.")
 					writeJ(w, "", true)
@@ -160,24 +160,24 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 
 }
 
-func ldapAuth(un, pw string) bool {
+func ldapAuth(cfg AuthConf, un, pw string) bool {
 	//Build DN: uid=admin,ou=People,dc=example,dc=com
 	dn := cfg.LdapUn+"="+un+",ou="+cfg.LdapOu+","+cfg.LdapDn
 	l := ldap.NewLDAPConnection(cfg.LdapUrl, cfg.LdapPort)
 	err := l.Connect()
 	if err != nil {
-		fmt.Print(dn)
+		log.Println(dn)
 		fmt.Printf("LDAP connectiong error: %v", err)
 		return false
 	}
 	defer l.Close()
 	err = l.Bind(dn, pw)
 	if err != nil {
-		fmt.Print(dn)
+		log.Println(dn)
 		fmt.Printf("error: %v", err)
 		return false
 	}
-	fmt.Print("Authenticated")
+	log.Println("Authenticated")
 	return true			
 }
 
