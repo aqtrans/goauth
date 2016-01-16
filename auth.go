@@ -10,11 +10,12 @@ import (
 	"log"
 	"fmt"
 	"net/http"
+    "net/url"
 	//"time"
 	"encoding/json"
 )
 
-// Pass an Auth subset inside conf.json
+// AuthConf: Pass an Auth subset inside conf.json
 /*    
     "AuthConf": {
             "Username": "aqtrans",
@@ -127,7 +128,12 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 			// Handle login POST request
 			username := template.HTMLEscapeString(r.FormValue("username"))
 			password := template.HTMLEscapeString(r.FormValue("password"))
-			log.Println("Referrer: " + r.Referer())
+            referer, err := url.Parse(r.Referer())
+            if err != nil {
+                log.Println("")
+            }
+            r2 := referer.Query().Get("url")
+			//log.Println(r2)
 			//log.Println(r.FormValue("username"))
 			//log.Println(r.FormValue("password"))
 			
@@ -138,16 +144,16 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 				if ldapAuth(cfg, username, password) || (username == cfg.Username && password == cfg.Password) {	
 					SetSession(username, w)
 					log.Println(username + " successfully logged in.")
-					writeJ(w, "", true)
+					loginRedir(w, r, r2)
 				} else {
-					writeJ(w, "", false)
+					writeJ(w, r, "", false)
 				}		
 			} else if username == cfg.Username && password == cfg.Password {	
 				SetSession(username, w)
 				log.Println(username + " successfully logged in.")
-				writeJ(w, "", true)
+				loginRedir(w, r, r2)
 			} else {
-				writeJ(w, "", false)
+				writeJ(w, r, "", false)
 			}	
 		case "PUT":
 			// Update an existing record.
@@ -187,20 +193,26 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
-func writeJ(w http.ResponseWriter, name string, success bool) error {
-	j := jsonresponse{
-		Name:    name,
-		Success: success,
-	}
-	json, err := makeJSON(w, j)
-	if err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(200)
-	w.Write(json)
-	//Debugln(string(json))
-	return nil
+// Failures should be handled by this, sending back JSON data to be handled in a small banner on the page.
+func writeJ(w http.ResponseWriter, r *http.Request, name string, success bool) error {
+    j := jsonresponse{
+        Name:    name,
+        Success: success,
+    }
+    json, err := makeJSON(w, j)
+    if err != nil {
+        return err
+    }
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.WriteHeader(200)
+    w.Write(json)
+    return nil
+}
+
+// Redirect back to given page after successful login.
+// Failure should be handled by JS, taking advantage of writeJ func above.
+func loginRedir(w http.ResponseWriter, r *http.Request, name string) {
+    http.Redirect(w, r, name, http.StatusFound)
 }
 
 func makeJSON(w http.ResponseWriter, data interface{}) ([]byte, error) {
@@ -218,7 +230,7 @@ func Auth(next http.HandlerFunc) http.HandlerFunc {
 		if username == "" {
 			log.Println("AuthMiddleware mitigating: " + r.Host + r.URL.String())
 			//w.Write([]byte("OMG"))
-			http.Redirect(w, r, "http://"+r.Host+"/login", 302)
+			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+r.URL.String(), 302)
 			return
 		}
 		log.Println(username + " is visiting " + r.Referer())
