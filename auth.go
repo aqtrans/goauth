@@ -3,7 +3,8 @@ package auth
 //Auth functions
 
 import (
-	"github.com/gorilla/securecookie"
+	//"github.com/gorilla/securecookie"
+    "github.com/gorilla/sessions"
 	"github.com/mavricknz/ldap"
 	//"github.com/gorilla/mux"
 	"html/template"
@@ -13,6 +14,7 @@ import (
     "net/url"
 	//"time"
 	"encoding/json"
+    "jba.io/go/utils"
 )
 
 // AuthConf: Pass an Auth subset inside conf.json
@@ -40,6 +42,10 @@ type AuthConf struct {
 	LdapOu   string `json:",omitempty"`
 }
 
+type Cookie struct {
+    Username string
+}
+
 //JSON Response
 type jsonresponse struct {
 	Name    string `json:"name,omitempty"`
@@ -48,57 +54,104 @@ type jsonresponse struct {
 
 var	cfg = AuthConf{}
 
-var cookieHandler = securecookie.New(
-	securecookie.GenerateRandomKey(64),
-	securecookie.GenerateRandomKey(32))
+//var sCookieHandler = securecookie.New(
+//	securecookie.GenerateRandomKey(64),
+//	securecookie.GenerateRandomKey(32))
+
+var CookieHandler = sessions.NewCookieStore(
+	[]byte("5CO4mHhkuV4BVDZT72pfkNxVhxOMHMN9lTZjGihKJoNWOUQf5j32NF2nx8RQypUh"),
+	[]byte("YuBmqpu4I40ObfPHw0gl7jeF88bk4eT4"),
+)    
 
 func AuthConfig(un, pass, ldapport, ldapurl, ldapdn, ldapun string) {
 
 }
 
-func SetSession(username string, w http.ResponseWriter) {
+// Takes a key, and a value to store inside a cookie
+// Currently used for username and CSRF tokens
+func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 	//defer timeTrack(time.Now(), "SetSession")
-	value := map[string]string{
-		"user": username,
-	}
-	if encoded, err := cookieHandler.Encode("session", value); err == nil {
-		cookie := &http.Cookie{
-			Name:     "session",
-			Value:    encoded,
-			Path:     "/",
-			HttpOnly: true,
-		}
-		http.SetCookie(w, cookie)
-	}
+    session, err := CookieHandler.Get(r, "session")
+    if err != nil {
+        http.Error(w, err.Error(), 500)
+        return
+    }
+    session.Options = &sessions.Options{
+        Path: "/",
+        HttpOnly: true,
+        Secure: false,
+    }
+	session.Values[key] = val
+    session.Save(r, w)
 }
 
+// Clear session, currently only clearing the user value
+// The CSRF token should always be around due to the login form and such
 func ClearSession(w http.ResponseWriter, r *http.Request) {
-	cookie := &http.Cookie{
-		Name:     "session",
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-	}
-	http.SetCookie(w, cookie)
+    s, err := CookieHandler.Get(r, "session")
+    if err != nil {
+        http.Error(w, err.Error(), 500)
+        return
+    }
+    _, ok := s.Values["user"].(string)
+    if ok {
+        delete(s.Values, "user")
+        s.Save(r, w)
+    }
 }
 
 func GetUsername(r *http.Request) (username string) {
 	//defer timeTrack(time.Now(), "GetUsername")
-	if cookie, err := r.Cookie("session"); err == nil {
-		cookieValue := make(map[string]string)
-		if err = cookieHandler.Decode("session", cookie.Value, &cookieValue); err == nil {
-			username = cookieValue["user"]
-			//log.Println(cookieValue)
-		}
-	} else {
-		username = ""
-	}
+    s, _ := CookieHandler.Get(r, "session")
+    username, _ = s.Values["user"].(string)
 	//log.Println("GetUsername: "+username)
 	return username
 }
 
-// GET request: serves a 
+// Retrieve a token 
+func GetToken(r *http.Request) (token string) {
+	//defer timeTrack(time.Now(), "GetUsername")
+    s, _ := CookieHandler.Get(r, "session")
+    token, _ = s.Values["token"].(string)
+    return token
+}
+
+// Only set a new token if one doesn't already exist
+func SetToken(w http.ResponseWriter, r *http.Request) (token string) {
+    s, _ := CookieHandler.Get(r, "session")
+    token, ok := s.Values["token"].(string)
+    if !ok {
+        token = utils.RandKey(32)
+        SetSession("token", token, w, r)
+    }
+    log.Println("SetToken: "+token)
+    return token
+}
+
+// Given an http.Request with a token input, compare it to the token in the session cookie
+func CheckToken(w http.ResponseWriter, r *http.Request) {
+    flashToken := GetToken(r)
+    tmplToken := r.FormValue("token")
+    log.Println("flashToken: "+flashToken)
+    log.Println("tmplToken: "+tmplToken) 
+    if tmplToken == "" {
+		http.Error(w, "CSRF Blank.", 500)
+		log.Println("CSRF blank")
+		return
+    }
+    if tmplToken != flashToken {
+		http.Error(w, "CSRF error!", 500)
+		log.Println("**CSRF mismatch!**")
+		return        
+    }
+    // Generate a new CSRF token after this one has been used
+    newToken := utils.RandKey(32)
+    SetSession("token", newToken, w, r)
+    log.Println("newToken: "+newToken)    
+}
+
+// GET request: serves nothing
+// POST request: compare username/password form values with LDAP or configured username/password combos
 func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
@@ -136,20 +189,22 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 			//log.Println(r2)
 			//log.Println(r.FormValue("username"))
 			//log.Println(r.FormValue("password"))
+            
+            // CSRF check
+            CheckToken(w, r)
 			
-			// LDAP
-			//if username == cfg.Username && password == cfg.Password {
+			// Login authentication
 			// Check if LDAP is enabled
 			if cfg.LdapEnabled {
 				if ldapAuth(cfg, username, password) || (username == cfg.Username && password == cfg.Password) {	
-					SetSession(username, w)
+					SetSession("user", username, w, r)
 					log.Println(username + " successfully logged in.")
 					loginRedir(w, r, r2)
 				} else {
 					writeJ(w, r, "", false)
 				}		
 			} else if username == cfg.Username && password == cfg.Password {	
-				SetSession(username, w)
+				SetSession("user", username, w, r)
 				log.Println(username + " successfully logged in.")
 				loginRedir(w, r, r2)
 			} else {
@@ -238,3 +293,17 @@ func Auth(next http.HandlerFunc) http.HandlerFunc {
 	}
 	return http.HandlerFunc(handler)
 }
+
+/*
+func Csrf(next http.HandlerFunc) http.HandlerFunc {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+        r.ParseForm()
+		flashToken := GetToken(r)
+		tmplToken := r.FormValue("token")
+        log.Println("flashToken: "+flashToken)
+        log.Println("tmplToken: "+tmplToken)
+		next.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(handler)
+}
+*/
