@@ -136,7 +136,7 @@ func CheckToken(w http.ResponseWriter, r *http.Request) {
     log.Println("tmplToken: "+tmplToken) 
     if tmplToken == "" {
 		http.Error(w, "CSRF Blank.", 500)
-		log.Println("CSRF blank")
+		log.Println("**CSRF blank**")
 		return
     }
     if tmplToken != flashToken {
@@ -267,7 +267,10 @@ func writeJ(w http.ResponseWriter, r *http.Request, name string, success bool) e
 // Redirect back to given page after successful login.
 // Failure should be handled by JS, taking advantage of writeJ func above.
 func loginRedir(w http.ResponseWriter, r *http.Request, name string) {
-    http.Redirect(w, r, name, http.StatusFound)
+    if name != "" {
+        http.Redirect(w, r, name, http.StatusFound)
+    }
+    writeJ(w, r, "", true)
 }
 
 func makeJSON(w http.ResponseWriter, data interface{}) ([]byte, error) {
