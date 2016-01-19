@@ -1,0 +1,555 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"gitlab",
+				"gitlab-ci"
+			],
+			[
+				"gitla",
+				"gitlab-ci"
+			],
+			[
+				"HandleFunc",
+				"HandlerFunc	func(http.ResponseWriter, *http.Request) ʈ"
+			],
+			[
+				"thumb",
+				"thumbPath"
+			],
+			[
+				"get",
+				"GetUsername"
+			],
+			[
+				"set",
+				"SetSession"
+			],
+			[
+				"File",
+				"Filename"
+			],
+			[
+				"content",
+				"contentLength"
+			],
+			[
+				"flex",
+				"FlexgetEntries"
+			],
+			[
+				"runtime",
+				"runtimeStatsHandler"
+			],
+			[
+				"type",
+				"TypeByExtension"
+			]
+		]
+	},
+	"buffers":
+	[
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 284.0,
+		"last_filter": "install",
+		"selected_items":
+		[
+			[
+				"install",
+				"Package Control: Install Package"
+			],
+			[
+				"cance",
+				"Go: Cancel Build"
+			],
+			[
+				"go run",
+				"Build With: Go - Run"
+			],
+			[
+				"insta",
+				"Package Control: Install Package"
+			],
+			[
+				"package",
+				"Package Control: List Packages"
+			],
+			[
+				"note",
+				"Notes: Index"
+			],
+			[
+				"sub",
+				"GoSublime: Show documentation hint"
+			]
+		],
+		"width": 870.0
+	},
+	"console":
+	{
+		"height": 249.0,
+		"history":
+		[
+			"import urllib.request,os,hashlib; h = 'eb2297e1a458f27d836c04bb0cbaf282' + 'd0e7a3098092775ccb37ca9d6b2e4b7d'; pf = 'Package Control.sublime-package'; ipp = sublime.installed_packages_path(); urllib.request.install_opener( urllib.request.build_opener( urllib.request.ProxyHandler()) ); by = urllib.request.urlopen( 'http://packagecontrol.io/' + pf.replace(' ', '%20')).read(); dh = hashlib.sha256(by).hexdigest(); print('Error validating download (got %s instead of %s), please try manual install' % (dh, h)) if dh != h else open(os.path.join( ipp, pf), 'wb' ).write(by) "
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/home/aqtrans/go/src/jba.io/go/auth"
+	],
+	"file_history":
+	[
+		"/home/aqtrans/.config/sublime-text-3/Packages/Default/Default (Linux).sublime-keymap",
+		"/home/aqtrans/.config/sublime-text-3/Packages/User/Preferences.sublime-settings",
+		"/home/aqtrans/.config/sublime-text-3/Packages/Default/Preferences.sublime-settings",
+		"/home/aqtrans/.config/sublime-text-3/Packages/User/golang.sublime-settings",
+		"/home/aqtrans/.config/sublime-text-3/Packages/GoSublime/Default (Linux).sublime-keymap",
+		"/home/aqtrans/.config/sublime-text-3/Packages/GoSublime/GoSublime.sublime-settings",
+		"/home/aqtrans/SpiderOak Hive/Notes/misc2.note",
+		"/home/aqtrans/SpiderOak Hive/Notes/todo.note",
+		"/a/cfg/rsnapshot.exclude",
+		"/a/rtb/doit.sh",
+		"/a/rtb/rsync_tmbackup.sh",
+		"/media/galactica/readme.txt",
+		"/a/rtb/README.md",
+		"/a/bin/borg.sh",
+		"/run/media/aqtrans/JBAIO/boot/grub/grub.cfg",
+		"/home/aqtrans/.local/share/akonadi/db_data/mysql.err",
+		"/home/aqtrans/.config/sublime-text-3/Packages/GoSublime/CHANGELOG.md",
+		"/home/aqtrans/Documents/My Games/Rocket League/TAGame/Config/TASystemSettings.ini",
+		"/a/bin/rocketleague-wine",
+		"/a/bin/full-backup.sh",
+		"/a/bin/push-rsync.sh",
+		"/a/cfg/backup-exclude",
+		"/home/aqtrans/Documents/kvm-win/start-win8vm.sh",
+		"/home/aqtrans/:q",
+		"/home/aqtrans/.config/fish/config.fish",
+		"/home/aqtrans/ansible/roles/fish/templates/config.fish",
+		"/home/aqtrans/ansible/roles/ssh/tasks/main.yml",
+		"/home/aqtrans/.ssh/config",
+		"/home/aqtrans/ansible/roles/ssh/templates/config.j2",
+		"/home/aqtrans/.config/autostart/ksuperkey.desktop",
+		"/home/aqtrans/pkgbuilds/cinnamon/cinnamon/set_wheel.patch",
+		"/home/aqtrans/pkgbuilds/cinnamon/cinnamon/set_wheel1.patch",
+		"/tmp/makepkg/cinnamon/src/Cinnamon-2.8.2/files/usr/share/cinnamon/cinnamon-settings-users/cinnamon-settings-users.py.new",
+		"/home/aqtrans/pkgbuilds/cinnamon/cinnamon/PKGBUILD",
+		"/home/aqtrans/.kodi/userdata/advancedsettings.xml",
+		"/home/aqtrans/.kodi/temp/kodi.log",
+		"/tmp/rsub-vihuvw/smb.conf",
+		"/tmp/rsub-vlujfn/config.yml",
+		"/tmp/rsub-lq3lbd/config.yml",
+		"/tmp/rsub-40cfoc/config.yml",
+		"/run/media/aqtrans/JBAIO/gpg/public.key",
+		"/run/media/aqtrans/JBAIO/gpg/ssh.key",
+		"/tmp/rsub-m9w19x/default.conf",
+		"/tmp/rsub-_ro2us/default.conf",
+		"/home/aqtrans/.local/share/Steam/steamapps/common/Cities_Skylines/Tools/Locale.bat",
+		"/home/aqtrans/.config/unity3d/Colossal Order/Cities: Skylines/Player.log",
+		"/home/aqtrans/Downloads/build.log.old",
+		"/home/aqtrans/Insync/kodi/userdata/sources.xml",
+		"/home/aqtrans/Insync/kodi/userdata/passwords.xml",
+		"/home/aqtrans/Insync/kodi/userdata/mediasources.xml",
+		"/home/aqtrans/Insync/kodi/userdata/advancedsettings.xml",
+		"/tmp/rsub-cp82s6/config.yml",
+		"/home/aqtrans/ansible/roles/gitlab/tasks/main.yml",
+		"/tmp/rsub-v921ii/gitlab.conf",
+		"/tmp/rsub-6rxcin/gitlab_ci.sql",
+		"/tmp/rsub-gcay3d/gitlab_ci.sql",
+		"/media/archEtc/android/fugu-MPA44I/flash-all.sh",
+		"/tmp/rsub-1o8shg/gitlab.yml",
+		"/tmp/rsub-mh16rd/gitlab.yml.example",
+		"/tmp/rsub-aq03n2/gitlab.conf",
+		"/tmp/rsub-402o22/config.yml",
+		"/home/aqtrans/go/src/jba.io/go/fileserve/auth.go",
+		"/usr/share/applications/sublime_text_3.desktop",
+		"/tmp/rsub-av83am/config.yml",
+		"/tmp/rsub-q2t3wp/config.yml",
+		"/tmp/rsub-ilzspb/allinone.patch",
+		"/tmp/rsub-hnht80/config.yml",
+		"/home/aqtrans/.config/sublime-text-3/Packages/User/GoSublime.sublime-settings",
+		"/home/aqtrans/.config/sublime-text-3/Packages/GoSublime/USAGE.md",
+		"/tmp/rsub-0mj4l8/config.yml",
+		"/run/media/aqtrans/JBAIO/slax.txt",
+		"/home/aqtrans/.xinitrc",
+		"/home/aqtrans/.kdesrc-buildrc",
+		"/tmp/rsub-ayj3rs/config.yml",
+		"/tmp/rsub-yvtkx8/config.yml",
+		"/home/aqtrans/.config/sublime-text-3/Packages/Git/Git.sublime-settings",
+		"/tmp/rsub-hq0p5_/config.yml",
+		"/home/aqtrans/Sync/notes/misc.md",
+		"/tmp/rsub-2ydbos/gitit.conf",
+		"/tmp/rsub-gsc959/default.conf",
+		"/tmp/rsub-odqf5h/Framework.hs",
+		"/tmp/rsub-3c16vh/Gitit.hs",
+		"/tmp/rsub-gvhes8/Authentication.hs",
+		"/tmp/rsub-7wa_n9/Authentication.hs",
+		"/tmp/rsub-lh9s9y/Framework.hs",
+		"/tmp/rsub-7jzapi/Framework.hs",
+		"/tmp/rsub-f671km/Authentication.hs",
+		"/tmp/rsub-diz7xx/Handlers.hs",
+		"/tmp/rsub-51p8ix/470.patch",
+		"/tmp/rsub-dkyu44/384.patch",
+		"/tmp/rsub-sri_x6/Framework.hs",
+		"/tmp/rsub-kx_axz/Config.hs",
+		"/tmp/rsub-h4lous/Authentication.hs",
+		"/tmp/rsub-5eeg2m/Initialize.hs",
+		"/tmp/rsub-uteemh/Authentication.hs",
+		"/tmp/rsub-nizdk_/Config.hs",
+		"/tmp/rsub-rm0cso/Config.hs",
+		"/tmp/rsub-q1sz5o/Authentication.hs",
+		"/tmp/rsub-xprmrv/Types.hs",
+		"/tmp/rsub-9ez6e5/default.conf",
+		"/tmp/rsub-z4xge4/Types.hs",
+		"/tmp/rsub-4bbose/Config.hs",
+		"/tmp/rsub-vx363e/Authentication.hs",
+		"/tmp/rsub-4yzi8m/Types.hs",
+		"/tmp/rsub-7uoeui/Framework.hs",
+		"/tmp/rsub-6zo0en/Framework.hs",
+		"/tmp/rsub-nro8hq/470.patch",
+		"/tmp/rsub-49sp_0/Handlers.hs",
+		"/tmp/rsub-acs7u9/Handlers.hs",
+		"/home/aqtrans/Sync/notes/moarmisc.md",
+		"/a/bin/upgrade-gitlab",
+		"/tmp/rsub-gthz2o/gitlab.conf",
+		"/tmp/rsub-1picv1/gitit.conf",
+		"/home/aqtrans/ansible/roles/sensu/tasks/main.yml",
+		"/home/aqtrans/ansible/cfg/homer_hosts",
+		"/tmp/rsub-805b2y/dns.conf",
+		"/tmp/rsub-or474f/gitlab.yml",
+		"/a/bin/open-port",
+		"/a/bin/addpkg",
+		"/tmp/rsub-iedd36/server.go",
+		"/tmp/rsub-edqm0h/server.go",
+		"/home/aqtrans/go/src/jba.io/go/snap/main.go",
+		"/home/aqtrans/Downloads/BackupPC_Admin",
+		"/tmp/rsub-7wd6lq/config.yml",
+		"/tmp/rsub-lb97uj/collectd.conf",
+		"/home/aqtrans/pkgbuilds/synergy/PKGBUILD",
+		"/tmp/rsub-0zc4h7/hosts",
+		"/tmp/rsub-wurw8u/config.pl"
+	],
+	"find":
+	{
+		"height": 43.0
+	},
+	"find_in_files":
+	{
+		"height": 118.0,
+		"where_history":
+		[
+			""
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"log",
+			"PROFILE_FOLDER",
+			"patched/",
+			"newsrc/",
+			"j8",
+			"balias",
+			"wiki",
+			"post",
+			"_login",
+			"base",
+			"char",
+			"maybe",
+			"ldapFilter",
+			"filterExpr",
+			"read",
+			"for",
+			"sudo",
+			"remote_user",
+			"fish_user",
+			"network",
+			"200",
+			"log.println",
+			"split",
+			"w.Write",
+			"w.write",
+			"text/html",
+			"html",
+			"if r.formv",
+			"if r.form",
+			"custom",
+			"sanitize",
+			"path.",
+			"strip",
+			"func APInewShortUrlForm",
+			"msg",
+			"Msg",
+			"r.body",
+			"func APInewImage",
+			"apinewf",
+			"w.write",
+			"loginHandler",
+			"func loginHandler",
+			"tkot",
+			"banan",
+			"w.write",
+			".ext",
+			"downloadImageHandler",
+			"wiki",
+			"snip",
+			"loadlistpage(",
+			"loadpage(",
+			"loadMainPage(title, c)",
+			"loadPage(title, c)",
+			"loadpage",
+			"getusern",
+			"aaa",
+			"user",
+			"func loadmainpa",
+			"loadmainpa",
+			"getusername",
+			"httpau",
+			"cfg.user",
+			"getuser",
+			"servehttp",
+			"statussee",
+			"loadlistpage",
+			"APIlgAction",
+			"apinewfi",
+			"APInewRemoteFile",
+			"rendertempl",
+			"renderTemplate",
+			"w.header",
+			"APInewShortUrlForm",
+			"APIremoteImageHandler",
+			"putImageHandler",
+			"lgaction",
+			"shortUrlFormHandler",
+			"remoteDownloadHandler",
+			"APIsaveSnipHandler",
+			"APInewSnipFormHandler",
+			"APIpasteUpHandler",
+			"APIfilePutHandler",
+			"pasteFormHandler",
+			"appendSnipHandler",
+			"saveSnipHandler",
+			"newSnipFormHandler",
+			"adduser",
+			"deleteHandler",
+			"APIfilePutHandler",
+			"pasteup",
+			"puthandler",
+			"newSnipFormHandler",
+			"rendertem",
+			"puthandler",
+			"rendertempl",
+			"putHandler",
+			"buffer",
+			"length",
+			"logpath",
+			"sshd_log",
+			"action =",
+			"prettyda",
+			"loadGalleryPage",
+			"imageDirectHandler",
+			"embiggen",
+			"thumb",
+			"imageThumbHandler",
+			"append",
+			":= &",
+			"loadlist",
+			"db.view",
+			"loadpage",
+			"db.view",
+			"^alias",
+			"\"",
+			"=",
+			"__hostna",
+			"doubles are stored in x86 representation",
+			"doubles ",
+			"filename :=",
+			"save()",
+			"(w, ",
+			"putHandler",
+			"downloadha",
+			"c.urlpar",
+			"cli",
+			"getscheme",
+			"r.header"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+			"b/",
+			"a/",
+			"become",
+			"become_user",
+			"loadMainPage(title, r, c)",
+			"loadPage(title, r, c)",
+			"balias",
+			"'",
+			" "
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"sheets":
+			[
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 43.0
+	},
+	"input":
+	{
+		"height": 40.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.9o:///home/aqtrans/go/src/jba.io/go/fileserve":
+	{
+		"height": 158.0
+	},
+	"output.9o:///home/aqtrans/go/src/jba.io/go/snap":
+	{
+		"height": 158.0
+	},
+	"output.9o:///home/aqtrans/go/src/jba.io/go/thing":
+	{
+		"height": 158.0
+	},
+	"output.9o:///home/aqtrans/go/src/jba.io/go/wiki":
+	{
+		"height": 218.0
+	},
+	"output.9o:///tmp/rsub-edqm0h":
+	{
+		"height": 158.0
+	},
+	"output.9o:///tmp/rsub-iedd36":
+	{
+		"height": 158.0
+	},
+	"output.GoSublime-main-output":
+	{
+		"height": 176.0
+	},
+	"output.GoSublime-output":
+	{
+		"height": 158.0
+	},
+	"output.GsDoc-output-output":
+	{
+		"height": 158.0
+	},
+	"output.MarGo-output":
+	{
+		"height": 158.0
+	},
+	"output.exec":
+	{
+		"height": 343.0
+	},
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"output.golang_build":
+	{
+		"height": 218.0
+	},
+	"pinned_build_system": "Packages/User/golang.sublime-build",
+	"project": "auth.sublime-project",
+	"replace":
+	{
+		"height": 82.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 703.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 534.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": true,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 289.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
