@@ -6,6 +6,7 @@ import (
 	//"github.com/gorilla/securecookie"
     "github.com/gorilla/sessions"
 	"github.com/mavricknz/ldap"
+    "github.com/gorilla/context"
 	//"github.com/gorilla/mux"
 	"html/template"
 	"log"
@@ -15,7 +16,12 @@ import (
 	//"time"
 	"encoding/json"
     "jba.io/go/utils"
+    "strings"
 )
+
+type key int
+const TokenKey key = 0
+const UserKey key = 1
 
 // AuthConf: Pass an Auth subset inside conf.json
 /*    
@@ -100,20 +106,55 @@ func ClearSession(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-func GetUsername(r *http.Request) (username string) {
+func getUsernameFromCookie(r *http.Request) (username string) {
 	//defer timeTrack(time.Now(), "GetUsername")
     s, _ := CookieHandler.Get(r, "session")
-    username, _ = s.Values["user"].(string)
+    username, ok := s.Values["user"].(string)
+    if !ok {
+        username = ""
+    }
 	//log.Println("GetUsername: "+username)
 	return username
 }
 
 // Retrieve a token 
-func GetToken(r *http.Request) (token string) {
+func getTokenFromCookie(r *http.Request) (token string) {
 	//defer timeTrack(time.Now(), "GetUsername")
     s, _ := CookieHandler.Get(r, "session")
-    token, _ = s.Values["token"].(string)
+    token, ok := s.Values["token"].(string)
+    if !ok {
+        
+    }
     return token
+}
+
+// Retrieve username from context
+func GetUsername(r *http.Request) (username string) {
+	//defer timeTrack(time.Now(), "GetUsername")
+    u, ok := context.GetOk(r, UserKey)
+    if !ok {
+        log.Println("No username in context.")
+        u = ""
+    }
+	return u.(string)
+}
+
+// Retrieve token from context
+func GetToken(r *http.Request) (token string) {
+	//defer timeTrack(time.Now(), "GetUsername")
+    t, ok := context.GetOk(r, TokenKey)
+    if !ok {
+        log.Println("No token in context.")
+        t = ""
+    }
+    return t.(string)
+}
+
+func genToken(w http.ResponseWriter, r *http.Request) (token string) {
+    token = utils.RandKey(32)
+    SetSession("token", token, w, r)
+    log.Println("SetToken: "+token)
+    return token     
 }
 
 // Only set a new token if one doesn't already exist
@@ -123,8 +164,9 @@ func SetToken(w http.ResponseWriter, r *http.Request) (token string) {
     if !ok {
         token = utils.RandKey(32)
         SetSession("token", token, w, r)
+        log.Println("new token generated")
     }
-    log.Println("SetToken: "+token)
+    context.Set(r, TokenKey, token)
     return token
 }
 
@@ -183,15 +225,23 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 			password := template.HTMLEscapeString(r.FormValue("password"))
             referer, err := url.Parse(r.Referer())
             if err != nil {
-                log.Println("")
+                log.Println(err)
             }
-            r2 := referer.Query().Get("url")
-			//log.Println(r2)
+            
+            // Check if we have a ?url= query string, from AuthMiddle
+            // Otherwise, just use the referrer 
+            var r2 string
+            r2 = referer.Query().Get("url")
+            if r2 == "" {
+               log.Println("r2 is blank")
+               r2 = r.Referer()
+            }
+            log.Println(r2)
 			//log.Println(r.FormValue("username"))
 			//log.Println(r.FormValue("password"))
             
             // CSRF check
-            CheckToken(w, r)
+            //CheckToken(w, r)
 			
 			// Login authentication
 			// Check if LDAP is enabled
@@ -199,16 +249,22 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 				if ldapAuth(cfg, username, password) || (username == cfg.Username && password == cfg.Password) {	
 					SetSession("user", username, w, r)
 					log.Println(username + " successfully logged in.")
-					loginRedir(w, r, r2)
+                    writeJ(w, r, r2, true)
+					//loginRedir(w, r, r2)
+                    return
 				} else {
 					writeJ(w, r, "", false)
+                    return
 				}		
 			} else if username == cfg.Username && password == cfg.Password {	
 				SetSession("user", username, w, r)
 				log.Println(username + " successfully logged in.")
-				loginRedir(w, r, r2)
+                writeJ(w, r, r2, true)
+                //loginRedir(w, r, r2)
+                return
 			} else {
 				writeJ(w, r, "", false)
+                return
 			}	
 		case "PUT":
 			// Update an existing record.
@@ -282,9 +338,89 @@ func makeJSON(w http.ResponseWriter, data interface{}) ([]byte, error) {
 	return jsonData, nil
 }
 
+func XsrfMiddle(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Check if there's an existing xsrf
+        // If not, generate one in the cookie
+        reqID := SetToken(w, r)
+        log.Println("reqID: "+reqID)
+        switch r.Method {
+            case "GET":
+                //log.Println(r.URL.Path)
+                //SetToken(w, r)
+                context.Set(r, TokenKey, reqID)
+                
+                next.ServeHTTP(w, r) 
+            case "POST":
+                tmplToken := r.FormValue("token")
+                log.Println("POST: flashToken: "+reqID)
+                log.Println("POST: tmplToken: "+tmplToken)
+                // Actually check CSRF token, since this is a POST request
+                if tmplToken == "" {
+                    http.Error(w, "CSRF Blank.", 500)
+                    log.Println("**CSRF blank**")
+                    return
+                }
+                if tmplToken != reqID {
+                    http.Error(w, "CSRF error!", 500)
+                    log.Println("**CSRF mismatch!**")
+                    return        
+                }
+                newToken := utils.RandKey(32)
+                SetSession("token", newToken, w, r)
+                log.Println("newToken: "+newToken)
+                
+                next.ServeHTTP(w, r)
+            case "PUT":
+            
+                next.ServeHTTP(w, r)
+            case "DELETE":
+            
+                next.ServeHTTP(w, r)
+            default:
+            
+                next.ServeHTTP(w, r)
+        }
+
+	})
+}
+
+func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username := getUsernameFromCookie(r)
+		if username == "" {
+            rurl := r.URL.String()
+			log.Println("AuthMiddleware mitigating: " + r.Host + rurl)
+			//w.Write([]byte("OMG"))
+            
+            // Detect if we're in an endless loop, if so, just panic
+            if strings.HasPrefix(rurl, "login?url=/login") {
+                panic("AuthMiddle is in an endless redirect loop")
+                return
+            }
+			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
+			return
+		}
+		//log.Println(username + " is visiting " + r.Referer())
+        //log.Println(username)
+        context.Set(r, UserKey, username) 
+		next.ServeHTTP(w, r)
+	})
+}
+
+func UserEnvMiddle(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username := getUsernameFromCookie(r)
+		//log.Println(username + " is visiting " + r.Referer())
+        //log.Println(username)
+        context.Set(r, UserKey, username) 
+		next.ServeHTTP(w, r)
+	})
+}
+
 func Auth(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		username := GetUsername(r)
+		username := getUsernameFromCookie(r)
 		if username == "" {
 			log.Println("AuthMiddleware mitigating: " + r.Host + r.URL.String())
 			//w.Write([]byte("OMG"))
