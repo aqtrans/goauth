@@ -366,6 +366,8 @@ func XsrfMiddle(next http.Handler) http.Handler {
                     log.Println("**CSRF mismatch!**")
                     return        
                 }
+                
+                // If this is a POST request, and the tokens match, generate a new one
                 newToken := utils.RandKey(32)
                 SetSession("token", newToken, w, r)
                 log.Println("newToken: "+newToken)
@@ -418,9 +420,10 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 	})
 }
 
-func Auth(next http.HandlerFunc) http.HandlerFunc {
+
+func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		username := getUsernameFromCookie(r)
+		username := GetUsername(r)
 		if username == "" {
 			log.Println("AuthMiddleware mitigating: " + r.Host + r.URL.String())
 			//w.Write([]byte("OMG"))
