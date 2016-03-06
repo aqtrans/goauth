@@ -153,12 +153,12 @@ func GetToken(r *http.Request) (token string) {
 func genToken(w http.ResponseWriter, r *http.Request) (token string) {
     token = utils.RandKey(32)
     SetSession("token", token, w, r)
-    log.Println("SetToken: "+token)
+    log.Println("genToken: "+token)
     return token     
 }
 
 // Only set a new token if one doesn't already exist
-func SetToken(w http.ResponseWriter, r *http.Request) (token string) {
+func setToken(w http.ResponseWriter, r *http.Request) (token string) {
     s, _ := CookieHandler.Get(r, "session")
     token, ok := s.Values["token"].(string)
     if !ok {
@@ -166,7 +166,7 @@ func SetToken(w http.ResponseWriter, r *http.Request) (token string) {
         SetSession("token", token, w, r)
         log.Println("new token generated")
     }
-    log.Println(token)
+    log.Println("setToken: " + token)
     context.Set(r, TokenKey, token)
     return token
 }
@@ -344,7 +344,7 @@ func XsrfMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         // Check if there's an existing xsrf
         // If not, generate one in the cookie
-        reqID := SetToken(w, r)
+        reqID := setToken(w, r)
         log.Println("reqID: "+reqID)
         switch r.Method {
             case "GET":
