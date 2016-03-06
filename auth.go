@@ -166,30 +166,32 @@ func SetToken(w http.ResponseWriter, r *http.Request) (token string) {
         SetSession("token", token, w, r)
         log.Println("new token generated")
     }
+    log.Println(token)
     context.Set(r, TokenKey, token)
     return token
 }
 
 // Given an http.Request with a token input, compare it to the token in the session cookie
-func CheckToken(w http.ResponseWriter, r *http.Request) {
+func CheckToken(w http.ResponseWriter, r *http.Request) error {
     flashToken := GetToken(r)
     tmplToken := r.FormValue("token")
     log.Println("flashToken: "+flashToken)
     log.Println("tmplToken: "+tmplToken) 
     if tmplToken == "" {
-		http.Error(w, "CSRF Blank.", 500)
+		//http.Error(w, "CSRF Blank.", 500)
 		log.Println("**CSRF blank**")
-		return
+		return fmt.Errorf("CSRF Blank! flashToken: %s tmplToken: %s", flashToken, tmplToken)
     }
     if tmplToken != flashToken {
-		http.Error(w, "CSRF error!", 500)
+		//http.Error(w, "CSRF error!", 500)
 		log.Println("**CSRF mismatch!**")
-		return        
+		return fmt.Errorf("CSRF Mismatch! flashToken: %s tmplToken: %s", flashToken, tmplToken)       
     }
     // Generate a new CSRF token after this one has been used
     newToken := utils.RandKey(32)
     SetSession("token", newToken, w, r)
-    log.Println("newToken: "+newToken)    
+    log.Println("newToken: "+newToken) 
+    return nil
 }
 
 // GET request: serves nothing
