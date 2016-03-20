@@ -1,0 +1,12 @@
+{
+    "Users": {
+    },
+    "Roles": {
+    },
+    "LdapEnabled": true,
+    "LdapPort": 389,
+    "LdapUrl": "ldap.server.tld",
+    "LdapDn": "dc=example,dc=com",
+    "LdapUn": "uid",
+    "LdapOu": "People"
+}
