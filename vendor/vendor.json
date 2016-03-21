@@ -3,6 +3,11 @@
 	"ignore": "test",
 	"package": [
 		{
+			"path": "github.com/boltdb/bolt",
+			"revision": "359b138d7333227aa4c76bf752881822ea21ae8a",
+			"revisionTime": "2015-01-18T07:55:06-08:00"
+		},
+		{
 			"path": "github.com/gorilla/context",
 			"revision": "215affda49addc4c8ef7e2534915df2c8c35c6cd",
 			"revisionTime": "2014-12-17T08:02:51-08:00"
