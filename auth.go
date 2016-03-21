@@ -1,6 +1,21 @@
 package auth
 
 //Auth functions
+// Currently handles the following:
+//  User Auth:
+//   - User sign-up, stored in a Boltdb named auth.db
+//   - User roles, currently hard-coded to two, "User" and "Admin", probably case-sensitive
+//   - User authentication against Boltdb and optionally LDAP
+//       - Cookie-powered
+//       - With gorilla/context to help pass around the user info 
+//   - Boltdb powered, using Users and Roles buckets
+//
+//  XSRF: 
+//   - Cross-site Request Forgery protection, using the same concept I use for auth functions above
+
+// TODO:
+//  - Switch to Bolt for storing User info
+//      - Mostly working
 
 import (
 	//"github.com/gorilla/securecookie"
@@ -8,6 +23,7 @@ import (
 	"github.com/mavricknz/ldap"
     "github.com/gorilla/context"
     "gopkg.in/hlandau/passlib.v1"
+    "github.com/boltdb/bolt"
     "errors"
 	//"github.com/gorilla/mux"
 	"html/template"
@@ -15,16 +31,19 @@ import (
 	"fmt"
 	"net/http"
     "net/url"
-    "os"
+    //"os"
 	//"time"
 	"encoding/json"
     "jba.io/go/utils"
     "strings"
 )
 
+var Authdb, _ = bolt.Open("./auth.db", 0600, nil)
+
 type key int
 const TokenKey key = 0
 const UserKey key = 1
+const RoleKey key = 2
 
 // AuthConf: Pass Auth inside auth.json
 /*    
@@ -40,23 +59,31 @@ const UserKey key = 1
 */
 // Then decode and populate this struct using code from the main app
 type AuthConf struct {
-	Users       map[string]string
-    Roles       map[string]string
 	LdapEnabled bool
+    LdapConf
+}
+
+type LdapConf struct {
 	LdapPort uint16 `json:",omitempty"`
 	LdapUrl  string `json:",omitempty"`
 	LdapDn   string `json:",omitempty"`
 	LdapUn   string `json:",omitempty"`
-	LdapOu   string `json:",omitempty"`
+	LdapOu   string `json:",omitempty"`    
 }
 
-type Cookie struct {
+type User struct {
     Username string
+    Role     string
 }
 
 //JSON Response
 type jsonresponse struct {
 	Name    string `json:"name,omitempty"`
+	Success bool   `json:"success"`
+}
+type jsonauthresponse struct {
+	Name    string `json:"name,omitempty"`
+    Role    string `json:"name,omitempty"`
 	Success bool   `json:"success"`
 }
 
@@ -69,25 +96,93 @@ var	Authcfg = AuthConf{}
 var CookieHandler = sessions.NewCookieStore(
 	[]byte("5CO4mHhkuV4BVDZT72pfkNxVhxOMHMN9lTZjGihKJoNWOUQf5j32NF2nx8RQypUh"),
 	[]byte("YuBmqpu4I40ObfPHw0gl7jeF88bk4eT4"),
-)    
+)
 
-
+/*
 func init() {
-	authconf, _ := os.Open("auth.json")
-	decoder := json.NewDecoder(authconf)
+
+
+   
+    err := authdb.Update(func(tx *bolt.Tx) error {
+        userbucket := tx.Bucket([]byte("Users"))
+        rolebucket := tx.Bucket([]byte("Roles"))
+        
+        userbucketUser := userbucket.Get([]byte("admin"))
+        if userbucketUser == nil {
+            fmt.Println("admin Boltdb user does not exist, creating it.")
+            hash, err := passlib.Hash("admin")
+            if err != nil {
+                // couldn't hash password for some reason
+                return err
+            }
+            
+            err = userbucket.Put([]byte("admin"), []byte(hash))
+            if err != nil {
+                return err
+            }
+            
+            err = rolebucket.Put([]byte("admin"), []byte("Admin"))
+            if err != nil {
+                return err
+            }
+            fmt.Println("Username: admin")
+            fmt.Println("Password: admin")
+            fmt.Println("Role: Admin")
+            return nil
+        }
+        return nil
+    })
+    
+    if err != nil {
+        panic(err)
+    }*/
+    
+    
+
+    /*
+	//authconf, _ := os.Open("auth.json")
+    authjson, _ := os.OpenFile("auth.json", os.O_RDWR|os.O_CREATE, 0660)
+    defer authjson.Close()
+	decoder := json.NewDecoder(authjson)
 	err := decoder.Decode(&Authcfg)
 	if err != nil {
 		fmt.Println("error decoding Auth config:", err)
 	}
+    
+    // Check for/create admin JSON user:
+    admin := Authcfg.Users["admin"]
+    if admin == "" {
+        fmt.Println("admin JSON user does not exist, creating it.")
+        // Make the empty map
+        Authcfg.Users = make(map[string]string)
+        
+        hash, err := passlib.Hash("admin")
+        if err != nil {
+            // couldn't hash password for some reason
+            panic(err)
+        }
+        Authcfg.Users["admin"] = hash
+        Authcfg.Roles["admin"] = "Admin"
+        j, _ := json.MarshalIndent(Authcfg, "", "    ")
+        _, err = authjson.Write(j)
+        if err != nil {
+            panic(err)
+        }
+        fmt.Println("Username: admin")
+        fmt.Println("Password: admin")
+        fmt.Println("Role: Admin")
+        authjson.Sync()
+    }
+    
     //authcfg.Users = make(map[string]string)
     //j, _ := json.Marshal(authcfg)
     //log.Println(string(j))
 }
-
+*/
 //func AuthConfig(un, pass, ldapport, ldapurl, ldapdn, ldapun string) {
 //}
 
-// Takes a key, and a value to store inside a cookie
+// SetSession Takes a key, and a value to store inside a cookie
 // Currently used for username and CSRF tokens
 func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 	//defer timeTrack(time.Now(), "SetSession")
@@ -118,17 +213,27 @@ func ClearSession(w http.ResponseWriter, r *http.Request) {
         delete(s.Values, "user")
         s.Save(r, w)
     }
+    _, ok = s.Values["role"].(string)
+    if ok {
+        delete(s.Values, "role")
+        s.Save(r, w)
+    }    
 }
 
-func getUsernameFromCookie(r *http.Request) (username string) {
+func getUsernameFromCookie(r *http.Request) (username, role string) {
 	//defer timeTrack(time.Now(), "GetUsername")
     s, _ := CookieHandler.Get(r, "session")
-    username, ok := s.Values["user"].(string)
+    userC, ok := s.Values["user"].(string)
     if !ok {
         username = ""
+        role = ""
+    } else {
+        z := strings.Split(userC, ":")
+        username = z[0]
+        role = z[1]
     }
-	//log.Println("GetUsername: "+username)
-	return username
+
+	return username, role
 }
 
 // Retrieve a token 
@@ -142,15 +247,20 @@ func getTokenFromCookie(r *http.Request) (token string) {
     return token
 }
 
-// Retrieve username from context
-func GetUsername(r *http.Request) (username string) {
+// Retrieve username and role from context
+func GetUsername(r *http.Request) (username, role string) {
 	//defer timeTrack(time.Now(), "GetUsername")
-    u, ok := context.GetOk(r, UserKey)
+    userC, ok := context.GetOk(r, UserKey)
     if !ok {
         utils.Debugln("No username in context.")
-        u = ""
+        userC = ""
     }
-	return u.(string)
+    roleC, ok := context.GetOk(r, RoleKey)
+    if !ok {
+        utils.Debugln("No role in context.")
+        roleC = ""
+    }    
+	return userC.(string), roleC.(string)
 }
 
 // Retrieve token from context
@@ -189,8 +299,6 @@ func setToken(w http.ResponseWriter, r *http.Request) (token string) {
 func CheckToken(w http.ResponseWriter, r *http.Request) error {
     flashToken := GetToken(r)
     tmplToken := r.FormValue("token")
-    //log.Println("flashToken: "+flashToken)
-    //log.Println("tmplToken: "+tmplToken) 
     if tmplToken == "" {
 		//http.Error(w, "CSRF Blank.", 500)
 		utils.Debugln("**CSRF blank**")
@@ -244,8 +352,11 @@ func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
             err := newUser(username, password, role)
             if err != nil {
                 utils.Debugln(err)
-                panic(err)
-            }            
+				writeJ(w, r, "", false)
+                return
+            }
+            writeJ(w, r, "", true)
+            return
                         
 		case "PUT":
 			// Update an existing record.
@@ -258,7 +369,7 @@ func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
 // Comparing values with LDAP or configured username/password combos
-func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
+func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 		case "GET":
@@ -283,7 +394,7 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 			}
 			*/
 		case "POST":
-            //log.Println(cfg)
+
 			// Handle login POST request
 			username := template.HTMLEscapeString(r.FormValue("username"))
 			password := template.HTMLEscapeString(r.FormValue("password"))
@@ -300,35 +411,25 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
                utils.Debugln("referer is blank")
                r2 = r.Referer()
             }
-			//log.Println(r.FormValue("username"))
-			//log.Println(r.FormValue("password"))
             
             // CSRF check
             //CheckToken(w, r)
 			
 			// Login authentication
 			// Check if LDAP is enabled
-			if cfg.LdapEnabled {
-				if ldapAuth(cfg, username, password) || jsonAuth(cfg, username, password) {	
-					SetSession("user", username, w, r)
-					utils.Debugln(username + " successfully logged in.")
-                    writeJ(w, r, r2, true)
-					//loginRedir(w, r, r2)
-                    return
-				} else {
-					writeJ(w, r, "", false)
-                    return
-				}		
-			} else if jsonAuth(cfg, username, password){	
-				SetSession("user", username, w, r)
+			if auth(username, password) {
+                role := getUserRole(username)
+                fulluser := username + ":" + role
+                SetSession("user", fulluser, w, r)
 				utils.Debugln(username + " successfully logged in.")
                 writeJ(w, r, r2, true)
                 //loginRedir(w, r, r2)
                 return
-			} else {
-				writeJ(w, r, "", false)
-                return
-			}	
+            }
+            
+            writeJ(w, r, "", false)
+            return
+                
 		case "PUT":
 			// Update an existing record.
 		case "DELETE":
@@ -340,10 +441,10 @@ func LoginPostHandler(cfg AuthConf, w http.ResponseWriter, r *http.Request) {
 
 }
 
-func ldapAuth(cfg AuthConf, un, pw string) bool {
+func ldapAuth(un, pw string) bool {
 	//Build DN: uid=admin,ou=People,dc=example,dc=com
-	dn := cfg.LdapUn+"="+un+",ou="+cfg.LdapOu+","+cfg.LdapDn
-	l := ldap.NewLDAPConnection(cfg.LdapUrl, cfg.LdapPort)
+	dn := Authcfg.LdapUn+"="+un+",ou="+Authcfg.LdapConf.LdapOu+","+Authcfg.LdapConf.LdapDn
+	l := ldap.NewLDAPConnection(Authcfg.LdapConf.LdapUrl, Authcfg.LdapConf.LdapPort)
 	err := l.Connect()
 	if err != nil {
 		utils.Debugln(dn)
@@ -361,13 +462,59 @@ func ldapAuth(cfg AuthConf, un, pw string) bool {
 	return true			
 }
 
-func jsonAuth(cfg AuthConf, username, password string) bool {
-    hashedUserPass := cfg.Users[username]
+func getUserRole(username string) string {
+    var userRoleByte []byte
+    // Grab given user's role from Bolt
+    Authdb.View(func(tx *bolt.Tx) error {
+        b := tx.Bucket([]byte("Roles"))
+        v := b.Get([]byte(username))
+        if v == nil {
+            err := errors.New("User does not exist")
+            log.Println(err)
+            userRoleByte = []byte("")
+            return err            
+        }
+        userRoleByte = v
+        return nil
+    })
+    return string(userRoleByte)
+}
 
+// Bundle of all auth functions, checking which are enabled
+func auth(username, password string) bool {
+    if Authcfg.LdapEnabled {
+        if ldapAuth(username, password) || jsonAuth(username, password) {
+            return true
+        }
+    }
+    if jsonAuth(username, password) {
+        return true
+    }
+    return false
+}
+
+func jsonAuth(username, password string) bool {
+    var hashedUserPassByte []byte
+    // Grab given user's password from Bolt
+    Authdb.View(func(tx *bolt.Tx) error {
+        b := tx.Bucket([]byte("Users"))
+        v := b.Get([]byte(username))
+        if v == nil {
+            err := errors.New("User does not exist")
+            log.Println(err)
+            return err            
+        }
+        hashedUserPassByte = v
+        return nil
+    })
+    hashedUserPass := string(hashedUserPassByte)
+    utils.Debugln("hash " + hashedUserPass)
+    
     // newHash and err should be blank/nil on success
     newHash, err := passlib.Verify(password, hashedUserPass)
     if err != nil {
         // Incorrect password, malformed hash, etc.
+        log.Println("error verifying password")
         utils.Debugln(err)
         return false
     }
@@ -382,7 +529,7 @@ func jsonAuth(cfg AuthConf, username, password string) bool {
             return false
         }
     }
-    utils.Debugln("Authenticated via JSON")
+    utils.Debugln("Authenticated via Boltdb")
     return true
     
 }
@@ -397,6 +544,23 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 func writeJ(w http.ResponseWriter, r *http.Request, name string, success bool) error {
     j := jsonresponse{
         Name:    name,
+        Success: success,
+    }
+    json, err := makeJSON(w, j)
+    if err != nil {
+        return err
+    }
+    w.Header().Set("Content-Type", "application/json; charset=utf-8")
+    w.WriteHeader(200)
+    w.Write(json)
+    return nil
+}
+
+// Failures should be handled by this, sending back JSON data to be handled in a small banner on the page.
+func writeAuthJ(w http.ResponseWriter, r *http.Request, name, role string, success bool) error {
+    j := jsonauthresponse{
+        Name:    name,
+        Role:    role,
         Success: success,
     }
     json, err := makeJSON(w, j)
@@ -428,8 +592,10 @@ func makeJSON(w http.ResponseWriter, data interface{}) ([]byte, error) {
 }
 
 // Dedicated function to create new users, taking plaintext username, password, and role
-//  Hashing done in this function, no need to do it elsewhere
+//  Hashing done in this function, no need to do it before
 func newUser(username, password, role string) error {
+    
+    // Hash password now so if it fails we catch it before touching Bolt
     hash, err := passlib.Hash(password)
     if err != nil {
         // couldn't hash password for some reason
@@ -438,40 +604,87 @@ func newUser(username, password, role string) error {
     }
     
     // If no existing user, store username and hash
-    //authcfg.Users = make(map[string]string)
-    cfgUser := Authcfg.Users[username]
-    if cfgUser == "" {
-        Authcfg.Users[username] = hash
-        Authcfg.Roles[username] = role
-        j, _ := json.MarshalIndent(Authcfg, "", "    ")
-        //log.Println(authcfg.Users)
-        //log.Println(j)
-        authjson, _ := os.OpenFile("auth.json", os.O_RDWR|os.O_CREATE, 0660)
-        _, err := authjson.Write(j)
-        if err != nil {
+    viewerr := Authdb.View(func(tx *bolt.Tx) error {
+        userbucket := tx.Bucket([]byte("Users"))
+        
+        userbucketUser := userbucket.Get([]byte(username))
+        
+        // userbucketUser should be nil if user doesn't exist
+        if userbucketUser != nil {
+            err := errors.New("User already exists")
+            log.Println(err)
             return err
         }
         return nil
+    })
+    if viewerr != nil {
+        return viewerr
     }
+    
+    //var vb []byte
+    adderr := Authdb.Update(func(tx *bolt.Tx) error {
+        userbucket := tx.Bucket([]byte("Users"))
+        
+        userbucketUser := userbucket.Get([]byte(username))
+        
+        // userbucketUser should be nil if user doesn't exist
+        if userbucketUser != nil {
+            err := errors.New("User already exists")
+            log.Println(err)
+            return err
+        }
+        
+        err = userbucket.Put([]byte(username), []byte(hash))
+        if err != nil {
+            log.Println(err)
+            return err
+        }
+
+        return nil
+    })
+    
+    if adderr != nil {
+        return adderr
+    }
+    
+    roleerr := Authdb.Update(func(tx *bolt.Tx) error {
+        rolebucket := tx.Bucket([]byte("Roles"))
+
+        err = rolebucket.Put([]byte(username), []byte(role))
+        if err != nil {
+            log.Println(err)
+            return err
+        }
+        log.Println("User: " + username + " added as " + role)
+        return nil
+    })
+    if roleerr != nil {
+        return roleerr
+    }
+    
     return nil
 }
 
 func updatePass(username, hash string) error {
-    cfgUser := Authcfg.Users[username]
-    // Only update existing user's passwords
-    if cfgUser == "" {
-        passErr := errors.New("Attempting to update password of unknown user" + username)
-        utils.Debugln(passErr)
-        return passErr
-    }
-    Authcfg.Users[username] = hash
-    j, _ := json.MarshalIndent(Authcfg, "", "    ")
-    utils.Debugln(j)
-    authjson, _ := os.OpenFile("auth.json", os.O_RDWR|os.O_CREATE, 0660)
-    _, err := authjson.Write(j)
-    if err != nil {
-        return err
-    }
+
+    // Update password only if user exists
+    Authdb.Update(func(tx *bolt.Tx) error {
+        userbucket := tx.Bucket([]byte("Users"))
+        userbucketUser := userbucket.Get([]byte(username))
+        
+        // userbucketUser should be nil if user doesn't exist
+        if userbucketUser == nil {
+            err := errors.New("User does not exist")
+            log.Println(err)
+            return err
+        }
+        err := userbucket.Put([]byte(username), []byte(hash))
+        if err != nil {
+            return err
+        }
+        log.Println("User " + username + " has changed their password.")
+        return nil
+    })
     return nil
 }
 
@@ -526,7 +739,7 @@ func XsrfMiddle(next http.Handler) http.Handler {
 func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
-        username := GetUsername(r)
+        username, role := GetUsername(r)
 		if username == "" {
             rurl := r.URL.String()
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
@@ -540,6 +753,8 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
+        log.Println(username + " is a " + role)
+        
 		utils.Debugln(username + " is visiting " + r.Referer())
         //context.Set(r, UserKey, username) 
 		next.ServeHTTP(w, r)
@@ -549,7 +764,7 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
-        username := GetUsername(r)
+        username, role := GetUsername(r)
 		if username == "" {
             rurl := r.URL.String()
 			utils.Debugln("AuthAdminMiddleware mitigating: " + r.Host + rurl)
@@ -563,11 +778,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
-        _, prs := Authcfg.Roles[username]
-        if !prs {
-            w.Write([]byte("YOU ARE NOT AN ADMIN"))
-            return
-        }
+        log.Println(username + " is a " + role)
         
 		utils.Debugln(username + " is visiting " + r.Referer())
         utils.Debugln(username)
@@ -579,10 +790,9 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 //UserEnvMiddle grabs username from cookie, tosses it into the context for use in various other middlewares
 func UserEnvMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username := getUsernameFromCookie(r)
-		//log.Println(username + " is visiting " + r.Referer())
-        //log.Println(username)
-        context.Set(r, UserKey, username) 
+		username, role := getUsernameFromCookie(r)
+        context.Set(r, UserKey, username)
+        context.Set(r, RoleKey, role)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -590,7 +800,7 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 
 func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		username := getUsernameFromCookie(r)
+		username, _ := getUsernameFromCookie(r)
 		if username == "" {
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + r.URL.String())
 			//w.Write([]byte("OMG"))
@@ -601,6 +811,46 @@ func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(handler)
+}
+
+func init() {
+    
+	Authdb.Update(func(tx *bolt.Tx) error {
+		userbucket, err := tx.CreateBucketIfNotExists([]byte("Users"))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		rolebucket, err := tx.CreateBucketIfNotExists([]byte("Roles"))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+        
+        
+        userbucketUser := userbucket.Get([]byte("admin"))
+        if userbucketUser == nil {
+            fmt.Println("admin Boltdb user does not exist, creating it.")
+            hash, err := passlib.Hash("admin")
+            if err != nil {
+                // couldn't hash password for some reason
+                return err
+            }
+            
+            err = userbucket.Put([]byte("admin"), []byte(hash))
+            if err != nil {
+                return err
+            }
+            
+            err = rolebucket.Put([]byte("admin"), []byte("Admin"))
+            if err != nil {
+                return err
+            }
+            fmt.Println("Username: admin")
+            fmt.Println("Password: admin")
+            fmt.Println("Role: Admin")
+            return nil
+        }        
+		return nil
+	})
 }
 
 /*
