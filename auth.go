@@ -42,8 +42,9 @@ var Authdb, _ = bolt.Open("./auth.db", 0600, nil)
 
 type key int
 const TokenKey key = 0
-const UserKey key = 1
-const RoleKey key = 2
+const UserKey  key = 1
+const RoleKey  key = 2
+const MsgKey   key = 3
 
 // AuthConf: Pass Auth inside auth.json
 /*    
@@ -200,6 +201,22 @@ func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
     session.Save(r, w)
 }
 
+func setFlash(msg string, w http.ResponseWriter, r *http.Request) {
+	//defer timeTrack(time.Now(), "SetSession")
+    session, err := CookieHandler.Get(r, "session")
+    if err != nil {
+        http.Error(w, err.Error(), 500)
+        return
+    }
+    session.Options = &sessions.Options{
+        Path: "/",
+        HttpOnly: true,
+        Secure: false,
+    }
+	session.AddFlash(msg)
+    session.Save(r, w)
+}
+
 // Clear session, currently only clearing the user value
 // The CSRF token should always be around due to the login form and such
 func ClearSession(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +237,7 @@ func ClearSession(w http.ResponseWriter, r *http.Request) {
     }    
 }
 
-func getUsernameFromCookie(r *http.Request) (username, role string) {
+func getUsernameFromCookie(r *http.Request) (username, role string, message []string) {
 	//defer timeTrack(time.Now(), "GetUsername")
     s, _ := CookieHandler.Get(r, "session")
     userC, ok := s.Values["user"].(string)
@@ -232,8 +249,15 @@ func getUsernameFromCookie(r *http.Request) (username, role string) {
         username = z[0]
         role = z[1]
     }
+    
+    if flashes := s.Flashes(); len(flashes) > 0 {
+        msg := s.Flashes()
+        for _, v := range msg {
+            message = append(message, v.(string))
+        }
+    }
 
-	return username, role
+	return username, role, message
 }
 
 // Retrieve a token 
@@ -411,12 +435,8 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
                utils.Debugln("referer is blank")
                r2 = r.Referer()
             }
-            
-            // CSRF check
-            //CheckToken(w, r)
 			
 			// Login authentication
-			// Check if LDAP is enabled
 			if auth(username, password) {
                 role := getUserRole(username)
                 fulluser := username + ":" + role
@@ -761,7 +781,58 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+func AuthMiddleAlice(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//username := getUsernameFromCookie(r)
+        username, role := GetUsername(r)
+		if username == "" {
+            rurl := r.URL.String()
+			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
+			//w.Write([]byte("OMG"))
+            
+            // Detect if we're in an endless loop, if so, just panic
+            if strings.HasPrefix(rurl, "login?url=/login") {
+                panic("AuthMiddle is in an endless redirect loop")
+                return
+            }
+			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
+			return
+		}
+        log.Println(username + " is a " + role)
+        
+		utils.Debugln(username + " is visiting " + r.Referer())
+        //context.Set(r, UserKey, username) 
+		next.ServeHTTP(w, r)
+	})
+}
+
 func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//username := getUsernameFromCookie(r)
+        username, role := GetUsername(r)
+		if username == "" {
+            rurl := r.URL.String()
+			utils.Debugln("AuthAdminMiddleware mitigating: " + r.Host + rurl)
+			//w.Write([]byte("OMG"))
+            
+            // Detect if we're in an endless loop, if so, just panic
+            if strings.HasPrefix(rurl, "login?url=/login") {
+                panic("AuthAdminMiddle is in an endless redirect loop")
+                return
+            }
+			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
+			return
+		}
+        log.Println(username + " is a " + role)
+        
+		utils.Debugln(username + " is visiting " + r.Referer())
+        utils.Debugln(username)
+        //context.Set(r, UserKey, username) 
+		next.ServeHTTP(w, r)
+	})
+}
+
+func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
         username, role := GetUsername(r)
@@ -790,9 +861,10 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 //UserEnvMiddle grabs username from cookie, tosses it into the context for use in various other middlewares
 func UserEnvMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username, role := getUsernameFromCookie(r)
+		username, role, message := getUsernameFromCookie(r)
         context.Set(r, UserKey, username)
         context.Set(r, RoleKey, role)
+        context.Set(r, MsgKey, message)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -800,7 +872,7 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 
 func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		username, _ := getUsernameFromCookie(r)
+		username, _, _ := getUsernameFromCookie(r)
 		if username == "" {
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + r.URL.String())
 			//w.Write([]byte("OMG"))
