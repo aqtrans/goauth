@@ -9,6 +9,7 @@ package auth
 //       - Cookie-powered
 //       - With gorilla/context to help pass around the user info 
 //   - Boltdb powered, using Users and Roles buckets
+//   - Success/failure is delivered via a redirect and a flash message
 //
 //  XSRF: 
 //   - Cross-site Request Forgery protection, using the same concept I use for auth functions above
@@ -201,20 +202,10 @@ func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
     session.Save(r, w)
 }
 
-func setFlash(msg string, w http.ResponseWriter, r *http.Request) {
-	//defer timeTrack(time.Now(), "SetSession")
-    session, err := CookieHandler.Get(r, "session")
-    if err != nil {
-        http.Error(w, err.Error(), 500)
-        return
-    }
-    session.Options = &sessions.Options{
-        Path: "/",
-        HttpOnly: true,
-        Secure: false,
-    }
-	session.AddFlash(msg)
-    session.Save(r, w)
+// SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
+//   middleware, pushes the message into context and then template
+func SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
+	SetSession("flash", msg, w, r)
 }
 
 // Clear session, currently only clearing the user value
@@ -237,7 +228,20 @@ func ClearSession(w http.ResponseWriter, r *http.Request) {
     }    
 }
 
-func getUsernameFromCookie(r *http.Request) (username, role string, message []string) {
+func clearFlash(w http.ResponseWriter, r *http.Request) {
+    s, err := CookieHandler.Get(r, "session")
+    if err != nil {
+        return
+    }    
+    _, ok := s.Values["flash"].(string)
+    if ok {
+        log.Println("flash cleared")
+        delete(s.Values, "flash")
+        s.Save(r, w)
+    }
+}
+
+func getUsernameFromCookie(r *http.Request) (username, role, message string) {
 	//defer timeTrack(time.Now(), "GetUsername")
     s, _ := CookieHandler.Get(r, "session")
     userC, ok := s.Values["user"].(string)
@@ -249,15 +253,13 @@ func getUsernameFromCookie(r *http.Request) (username, role string, message []st
         username = z[0]
         role = z[1]
     }
-    
-    if flashes := s.Flashes(); len(flashes) > 0 {
-        msg := s.Flashes()
-        for _, v := range msg {
-            message = append(message, v.(string))
-        }
+
+    messageC, ok := s.Values["flash"].(string)
+    if !ok {
+        messageC = ""
     }
 
-	return username, role, message
+	return username, role, messageC
 }
 
 // Retrieve a token 
@@ -272,7 +274,7 @@ func getTokenFromCookie(r *http.Request) (token string) {
 }
 
 // Retrieve username and role from context
-func GetUsername(r *http.Request) (username, role string) {
+func GetUsername(r *http.Request) (username, role, msg string) {
 	//defer timeTrack(time.Now(), "GetUsername")
     userC, ok := context.GetOk(r, UserKey)
     if !ok {
@@ -283,8 +285,14 @@ func GetUsername(r *http.Request) (username, role string) {
     if !ok {
         utils.Debugln("No role in context.")
         roleC = ""
-    }    
-	return userC.(string), roleC.(string)
+    }
+    msgC, ok := context.GetOk(r, MsgKey)
+    if !ok {
+        utils.Debugln("No role in context.")
+        msgC = ""
+    }
+    
+	return userC.(string), roleC.(string), msgC.(string)
 }
 
 // Retrieve token from context
@@ -376,10 +384,14 @@ func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
             err := newUser(username, password, role)
             if err != nil {
                 utils.Debugln(err)
-				writeJ(w, r, "", false)
+                SetSession("flash", "User registration failed.", w, r)
+                loginRedir(w, r, "/signup")
                 return
             }
-            writeJ(w, r, "", true)
+            
+            SetSession("flash", "Successful user registration.", w, r)
+            loginRedir(w, r, "/login")
+            
             return
                         
 		case "PUT":
@@ -442,12 +454,14 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
                 fulluser := username + ":" + role
                 SetSession("user", fulluser, w, r)
 				utils.Debugln(username + " successfully logged in.")
-                writeJ(w, r, r2, true)
-                //loginRedir(w, r, r2)
+                SetSession("flash", "User '" + username + "' successfully logged in.", w, r)
+                loginRedir(w, r, r2)
                 return
             }
             
-            writeJ(w, r, "", false)
+            SetSession("flash", "User '" + username + "' failed to login. <br> Please check your credentials and try again.", w, r)
+            loginRedir(w, r, "/login")
+            
             return
                 
 		case "PUT":
@@ -593,13 +607,9 @@ func writeAuthJ(w http.ResponseWriter, r *http.Request, name, role string, succe
     return nil
 }
 
-// Redirect back to given page after successful login.
-// Failure should be handled by JS, taking advantage of writeJ func above.
+// Redirect back to given page after successful login or signup.
 func loginRedir(w http.ResponseWriter, r *http.Request, name string) {
-    if name != "" {
-        http.Redirect(w, r, name, http.StatusFound)
-    }
-    writeJ(w, r, "", true)
+    http.Redirect(w, r, name, http.StatusSeeOther)
 }
 
 func makeJSON(w http.ResponseWriter, data interface{}) ([]byte, error) {
@@ -759,7 +769,7 @@ func XsrfMiddle(next http.Handler) http.Handler {
 func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
-        username, role := GetUsername(r)
+        username, role, _ := GetUsername(r)
 		if username == "" {
             rurl := r.URL.String()
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
@@ -783,8 +793,7 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 
 func AuthMiddleAlice(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		//username := getUsernameFromCookie(r)
-        username, role := GetUsername(r)
+        username, role, _ := GetUsername(r)
 		if username == "" {
             rurl := r.URL.String()
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
@@ -808,8 +817,7 @@ func AuthMiddleAlice(next http.Handler) http.Handler {
 
 func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		//username := getUsernameFromCookie(r)
-        username, role := GetUsername(r)
+        username, role, _ := GetUsername(r)
 		if username == "" {
             rurl := r.URL.String()
 			utils.Debugln("AuthAdminMiddleware mitigating: " + r.Host + rurl)
@@ -834,8 +842,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 
 func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		//username := getUsernameFromCookie(r)
-        username, role := GetUsername(r)
+        username, role, _ := GetUsername(r)
 		if username == "" {
             rurl := r.URL.String()
 			utils.Debugln("AuthAdminMiddleware mitigating: " + r.Host + rurl)
@@ -858,10 +865,13 @@ func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 	})
 }
 
-//UserEnvMiddle grabs username from cookie, tosses it into the context for use in various other middlewares
+//UserEnvMiddle grabs username, role, and flash message from cookie, 
+// tosses it into the context for use in various other middlewares
 func UserEnvMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, role, message := getUsernameFromCookie(r)
+        // Delete flash after pushing to context
+        clearFlash(w, r)
         context.Set(r, UserKey, username)
         context.Set(r, RoleKey, role)
         context.Set(r, MsgKey, message)
