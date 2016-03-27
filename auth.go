@@ -39,8 +39,6 @@ import (
     "strings"
 )
 
-var Authdb, _ = bolt.Open("./auth.db", 0600, nil)
-
 type key int
 const TokenKey key = 0
 const UserKey  key = 1
@@ -61,6 +59,7 @@ const MsgKey   key = 3
 */
 // Then decode and populate this struct using code from the main app
 type AuthConf struct {
+    AuthDbPath  string
 	LdapEnabled bool
     LdapConf
 }
@@ -90,6 +89,8 @@ type jsonauthresponse struct {
 }
 
 var	Authcfg = AuthConf{}
+
+var Authdb *bolt.DB
 
 //var sCookieHandler = securecookie.New(
 //	securecookie.GenerateRandomKey(64),
@@ -183,6 +184,15 @@ func init() {
 */
 //func AuthConfig(un, pass, ldapport, ldapurl, ldapdn, ldapun string) {
 //}
+
+func Open(path string) *bolt.DB {
+    var err error
+    Authdb, err = bolt.Open(path, 0600, nil)
+    if err != nil {
+        log.Println(err)
+    }
+    return Authdb
+}
 
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for username and CSRF tokens
@@ -447,6 +457,8 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
                utils.Debugln("referer is blank")
                r2 = r.Referer()
             }
+            
+            log.Println(Authdb.Path())
 			
 			// Login authentication
 			if auth(username, password) {
@@ -895,7 +907,9 @@ func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(handler)
 }
 
-func init() {
+func AuthDbInit() {
+    
+    log.Println(Authdb.Path())
     
 	Authdb.Update(func(tx *bolt.Tx) error {
 		userbucket, err := tx.CreateBucketIfNotExists([]byte("Users"))
@@ -906,7 +920,6 @@ func init() {
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
-        
         
         userbucketUser := userbucket.Get([]byte("admin"))
         if userbucketUser == nil {
