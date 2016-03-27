@@ -288,7 +288,7 @@ func GetUsername(r *http.Request) (username, role, msg string) {
     }
     msgC, ok := context.GetOk(r, MsgKey)
     if !ok {
-        utils.Debugln("No role in context.")
+        utils.Debugln("No message in context.")
         msgC = ""
     }
     
@@ -786,7 +786,7 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
         log.Println(username + " is a " + role)
         
 		utils.Debugln(username + " is visiting " + r.Referer())
-        //context.Set(r, UserKey, username) 
+        //context.Set(r, UserKey, username)
 		next.ServeHTTP(w, r)
 	})
 }
