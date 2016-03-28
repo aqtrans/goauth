@@ -382,6 +382,62 @@ func AdminUserPostHandler(w http.ResponseWriter, r *http.Request) {
 	}        
 }
 
+//AdminUserPostHandler only handles POST requests, using forms named "username" and "password"
+// Signing up users as necessary, inside the AuthConf
+func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+		case "GET":
+        case "POST":
+			username := template.HTMLEscapeString(r.FormValue("username"))
+			password := template.HTMLEscapeString(r.FormValue("password"))
+            // Hash password now so if it fails we catch it before touching Bolt
+            hash, err := passlib.Hash(password)
+            if err != nil {
+                // couldn't hash password for some reason
+                log.Fatalln(err)
+                return
+            }
+                    
+            err = updatePass(username, hash)
+            if err != nil {
+                utils.Debugln(err)
+                panic(err)
+            }
+        SetSession("flash", "Successfully changed '" + username + "' users password.", w, r)
+            
+		case "PUT":
+			// Update an existing record.
+		case "DELETE":
+			// Remove the record.
+		default:
+			// Give an error message.
+	}        
+}
+
+//AdminUserPostHandler only handles POST requests, using forms named "username" and "password"
+// Signing up users as necessary, inside the AuthConf
+func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+		case "GET":
+        case "POST":
+			username := template.HTMLEscapeString(r.FormValue("username"))
+
+            err := deleteUser(username)
+            if err != nil {
+                utils.Debugln(err)
+                panic(err)
+            }
+        SetSession("flash", "Successfully changed '" + username + "' users password.", w, r)
+            
+		case "PUT":
+			// Update an existing record.
+		case "DELETE":
+			// Remove the record.
+		default:
+			// Give an error message.
+	}        
+}
+
 //SignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
 func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -705,6 +761,18 @@ func newUser(username, password, role string) error {
     }
     
     return nil
+}
+
+func deleteUser(username string) error {
+    err := Authdb.Update(func(tx *bolt.Tx) error {
+        log.Println(username + " has been deleted")
+        return tx.Bucket([]byte("Users")).Delete([]byte(username))
+    })
+    if err != nil {
+        log.Println(err)
+        return err
+    }
+    return err
 }
 
 func updatePass(username, hash string) error {
