@@ -372,6 +372,9 @@ func AdminUserPostHandler(w http.ResponseWriter, r *http.Request) {
                 utils.Debugln(err)
                 panic(err)
             }
+ 
+        SetSession("flash", "Successfully added '" + username + "' user.", w, r)
+        loginRedir(w, r, "/admin/users")
             
 		case "PUT":
 			// Update an existing record.
@@ -404,6 +407,7 @@ func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
                 panic(err)
             }
         SetSession("flash", "Successfully changed '" + username + "' users password.", w, r)
+        loginRedir(w, r, "/admin/users")
             
 		case "PUT":
 			// Update an existing record.
@@ -428,6 +432,7 @@ func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
                 panic(err)
             }
         SetSession("flash", "Successfully changed '" + username + "' users password.", w, r)
+        loginRedir(w, r, "/admin/users")
             
 		case "PUT":
 			// Update an existing record.
