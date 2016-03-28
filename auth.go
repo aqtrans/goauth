@@ -910,12 +910,17 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
             // Detect if we're in an endless loop, if so, just panic
             if strings.HasPrefix(rurl, "login?url=/login") {
                 panic("AuthAdminMiddle is in an endless redirect loop")
-                return
             }
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
         log.Println(username + " is a " + role)
+        
+        if role != "Admin" {
+            log.Println(username + " attempting to access restricted URL.")
+            loginRedir(w, r, r.Referer())
+            return
+        }
         
 		utils.Debugln(username + " is visiting " + r.Referer())
         utils.Debugln(username)
@@ -941,6 +946,12 @@ func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 			return
 		}
         log.Println(username + " is a " + role)
+
+        if role != "Admin" {
+            log.Println(username + " attempting to access restricted URL.")
+            loginRedir(w, r, r.Referer())
+            return
+        }
         
 		utils.Debugln(username + " is visiting " + r.Referer())
         utils.Debugln(username)
