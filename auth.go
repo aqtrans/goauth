@@ -915,16 +915,16 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
         log.Println(username + " is a " + role)
-        
+        //If user is not an Admin, just redirect to index
         if role != "Admin" {
             log.Println(username + " attempting to access restricted URL.")
-            loginRedir(w, r, r.Referer())
+            SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
+            loginRedir(w, r, "/")
             return
         }
         
 		utils.Debugln(username + " is visiting " + r.Referer())
         utils.Debugln(username)
-        //context.Set(r, UserKey, username) 
 		next.ServeHTTP(w, r)
 	})
 }
@@ -949,13 +949,13 @@ func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 
         if role != "Admin" {
             log.Println(username + " attempting to access restricted URL.")
+            SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
             loginRedir(w, r, r.Referer())
             return
         }
         
 		utils.Debugln(username + " is visiting " + r.Referer())
         utils.Debugln(username)
-        //context.Set(r, UserKey, username) 
 		next.ServeHTTP(w, r)
 	})
 }
@@ -980,7 +980,6 @@ func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 		username, _, _ := getUsernameFromCookie(r)
 		if username == "" {
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + r.URL.String())
-			//w.Write([]byte("OMG"))
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+r.URL.String(), 302)
 			return
 		}
