@@ -59,7 +59,6 @@ const MsgKey   key = 3
 */
 // Then decode and populate this struct using code from the main app
 type AuthConf struct {
-    AuthDbPath  string
 	LdapEnabled bool
     LdapConf
 }
@@ -982,7 +981,7 @@ func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 
 func AuthDbInit() {
     
-    log.Println(Authdb.Path())
+    //log.Println(Authdb.Path())
     
 	Authdb.Update(func(tx *bolt.Tx) error {
 		userbucket, err := tx.CreateBucketIfNotExists([]byte("Users"))
