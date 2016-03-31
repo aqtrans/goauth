@@ -820,6 +820,12 @@ func XsrfMiddle(next http.Handler) http.Handler {
                 utils.Debugln("POST: tmplToken: "+tmplToken)
                 // Actually check CSRF token, since this is a POST request
                 if tmplToken == "" {
+                    contentType := r.Header.Get("Content-Type")
+                    // This should mean this is a request from the command line, so don't check CSRF
+                    if contentType == "" {
+                        next.ServeHTTP(w, r)
+                        return
+                    }
                     http.Error(w, "CSRF Blank.", 500)
                     utils.Debugln("**CSRF blank**")
                     return
