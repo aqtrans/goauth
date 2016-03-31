@@ -820,7 +820,8 @@ func XsrfMiddle(next http.Handler) http.Handler {
                 utils.Debugln("POST: tmplToken: "+tmplToken)
                 // Actually check CSRF token, since this is a POST request
                 if tmplToken == "" {
-                    log.Println(r.UserAgent())
+                    // Currently doing CLI checking by user-agent, only excluding curl
+                    // TODO: Probably a more secure way to do this..special header set in config maybe?
                     // This should mean this is a request from the command line, so don't check CSRF                    
                     if strings.HasPrefix(r.UserAgent(),"curl/") {
                         next.ServeHTTP(w, r)
