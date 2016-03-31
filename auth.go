@@ -815,19 +815,18 @@ func XsrfMiddle(next http.Handler) http.Handler {
                 context.Set(r, TokenKey, reqID)
                 next.ServeHTTP(w, r) 
             case "POST":
+                // Currently doing CLI checking by user-agent, only excluding curl
+                // TODO: Probably a more secure way to do this..special header set in config maybe?
+                // This should mean this is a request from the command line, so don't check CSRF                    
+                if strings.HasPrefix(r.UserAgent(),"curl") {
+                    next.ServeHTTP(w, r)
+                    return
+                }
                 tmplToken := r.FormValue("token")
                 utils.Debugln("POST: flashToken: "+reqID)
                 utils.Debugln("POST: tmplToken: "+tmplToken)
                 // Actually check CSRF token, since this is a POST request
                 if tmplToken == "" {
-                    // Currently doing CLI checking by user-agent, only excluding curl
-                    // TODO: Probably a more secure way to do this..special header set in config maybe?
-                    // This should mean this is a request from the command line, so don't check CSRF                    
-                    if strings.HasPrefix(r.UserAgent(),"curl/") {
-                        next.ServeHTTP(w, r)
-                        return
-                    }
-                    
                     http.Error(w, "CSRF Blank.", 500)
                     utils.Debugln("**CSRF blank**")
                     return
