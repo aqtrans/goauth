@@ -516,6 +516,10 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
             if r2 == "" {
                utils.Debugln("referer is blank")
                r2 = r.Referer()
+               // if r.Referer is blank, just redirect to index
+               if r.Referer() == "" || referer.RequestURI() == "/login" {
+                   r2 = "/"
+               }
             }
             
             log.Println(Authdb.Path())
