@@ -34,7 +34,7 @@ import (
     "net/url"
     //"os"
 	//"time"
-	"encoding/json"
+	//"encoding/json"
     "jba.io/go/utils"
     "strings"
 )
@@ -650,51 +650,9 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
-// Failures should be handled by this, sending back JSON data to be handled in a small banner on the page.
-func writeJ(w http.ResponseWriter, r *http.Request, name string, success bool) error {
-    j := jsonresponse{
-        Name:    name,
-        Success: success,
-    }
-    json, err := makeJSON(w, j)
-    if err != nil {
-        return err
-    }
-    w.Header().Set("Content-Type", "application/json; charset=utf-8")
-    w.WriteHeader(200)
-    w.Write(json)
-    return nil
-}
-
-// Failures should be handled by this, sending back JSON data to be handled in a small banner on the page.
-func writeAuthJ(w http.ResponseWriter, r *http.Request, name, role string, success bool) error {
-    j := jsonauthresponse{
-        Name:    name,
-        Role:    role,
-        Success: success,
-    }
-    json, err := makeJSON(w, j)
-    if err != nil {
-        return err
-    }
-    w.Header().Set("Content-Type", "application/json; charset=utf-8")
-    w.WriteHeader(200)
-    w.Write(json)
-    return nil
-}
-
 // Redirect back to given page after successful login or signup.
 func loginRedir(w http.ResponseWriter, r *http.Request, name string) {
     http.Redirect(w, r, name, http.StatusSeeOther)
-}
-
-func makeJSON(w http.ResponseWriter, data interface{}) ([]byte, error) {
-	jsonData, err := json.MarshalIndent(data, "", "    ")
-	if err != nil {
-		return nil, err
-	}
-	//Debugln(string(jsonData))
-	return jsonData, nil
 }
 
 // Dedicated function to create new users, taking plaintext username, password, and role
