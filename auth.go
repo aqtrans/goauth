@@ -715,13 +715,13 @@ func XsrfMiddle(next http.Handler) http.Handler {
 			utils.Debugln("POST: tmplToken: " + tmplToken)
 			// Actually check CSRF token, since this is a POST request
 			if tmplToken == "" {
-				http.Error(w, "CSRF Blank.", 500)
-				utils.Debugln("**CSRF blank**")
+				http.Error(w, "CSRF Token Blank.", 500)
+				utils.Debugln("**CSRF Token Blank**")
 				return
 			}
 			if tmplToken != reqID {
-				http.Error(w, "CSRF error!", 500)
-				utils.Debugln("**CSRF mismatch!**")
+				http.Error(w, "CSRF Token Error!", 500)
+				utils.Debugln("**CSRF Token Mismatch!**")
 				return
 			}
 
