@@ -14,6 +14,11 @@ package auth
 //  XSRF:
 //   - Cross-site Request Forgery protection, using the same concept I use for auth functions above
 
+// Required URLs:
+// This lib only handles POST requests on the following URLs
+// - Login - /login
+// - Signup - /signup
+
 // TODO:
 //  - Switch to Bolt for storing User info
 //      - Mostly working
@@ -22,21 +27,18 @@ import (
 	//"github.com/gorilla/securecookie"
 	"errors"
 
-	"github.com/boltdb/bolt"
-	"github.com/gorilla/context"
-	"github.com/gorilla/sessions"
-	"github.com/mavricknz/ldap"
-	"gopkg.in/hlandau/passlib.v1"
-	//"github.com/gorilla/mux"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
-	//"os"
-	//"time"
-	//"encoding/json"
 	"strings"
+
+	"github.com/boltdb/bolt"
+	"github.com/gorilla/context"
+	"github.com/gorilla/sessions"
+	"github.com/mavricknz/ldap"
+	"gopkg.in/hlandau/passlib.v1"
 
 	"jba.io/go/utils"
 )
@@ -48,7 +50,7 @@ const UserKey key = 1
 const RoleKey key = 2
 const MsgKey key = 3
 
-// AuthConf: Pass Auth inside auth.json
+// AuthConf: Pass Auth inside config.json
 /*
    "AuthConf": {
            "Users": {},
@@ -77,17 +79,6 @@ type LdapConf struct {
 type User struct {
 	Username string
 	Role     string
-}
-
-//JSON Response
-type jsonresponse struct {
-	Name    string `json:"name,omitempty"`
-	Success bool   `json:"success"`
-}
-type jsonauthresponse struct {
-	Name    string `json:"name,omitempty"`
-	Role    string `json:"name,omitempty"`
-	Success bool   `json:"success"`
 }
 
 var Authcfg = AuthConf{}
@@ -276,9 +267,9 @@ func CheckToken(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-//AdminUserPostHandler only handles POST requests, using forms named "username" and "password"
+//UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func AdminUserPostHandler(w http.ResponseWriter, r *http.Request) {
+func UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
@@ -292,7 +283,7 @@ func AdminUserPostHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		SetSession("flash", "Successfully added '"+username+"' user.", w, r)
-		loginRedir(w, r, "/admin/users")
+		postRedir(w, r, r.Referer())
 
 	case "PUT":
 		// Update an existing record.
@@ -303,7 +294,7 @@ func AdminUserPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-//AdminUserPostHandler only handles POST requests, using forms named "username" and "password"
+//AdminUserPassChangePostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
 func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -325,7 +316,7 @@ func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 		SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
-		loginRedir(w, r, "/admin/users")
+		postRedir(w, r, r.Referer())
 
 	case "PUT":
 		// Update an existing record.
@@ -336,7 +327,7 @@ func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-//AdminUserPostHandler only handles POST requests, using forms named "username" and "password"
+//AdminUserDeletePostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
 func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -350,7 +341,7 @@ func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 		SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
-		loginRedir(w, r, "/admin/users")
+		postRedir(w, r, r.Referer())
 
 	case "PUT":
 		// Update an existing record.
@@ -374,12 +365,12 @@ func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			utils.Debugln(err)
 			SetSession("flash", "User registration failed.", w, r)
-			loginRedir(w, r, "/signup")
+			postRedir(w, r, "/signup")
 			return
 		}
 
 		SetSession("flash", "Successful user registration.", w, r)
-		loginRedir(w, r, "/login")
+		postRedir(w, r, "/login")
 
 		return
 
@@ -450,12 +441,12 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			SetSession("user", fulluser, w, r)
 			utils.Debugln(username + " successfully logged in.")
 			SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
-			loginRedir(w, r, r2)
+			postRedir(w, r, r2)
 			return
 		}
 
 		SetSession("flash", "User '"+username+"' failed to login. <br> Please check your credentials and try again.", w, r)
-		loginRedir(w, r, "/login")
+		postRedir(w, r, "/login")
 
 		return
 
@@ -511,17 +502,17 @@ func getUserRole(username string) string {
 // Bundle of all auth functions, checking which are enabled
 func auth(username, password string) bool {
 	if Authcfg.LdapEnabled {
-		if ldapAuth(username, password) || jsonAuth(username, password) {
+		if ldapAuth(username, password) || boltAuth(username, password) {
 			return true
 		}
 	}
-	if jsonAuth(username, password) {
+	if boltAuth(username, password) {
 		return true
 	}
 	return false
 }
 
-func jsonAuth(username, password string) bool {
+func boltAuth(username, password string) bool {
 	var hashedUserPassByte []byte
 	// Grab given user's password from Bolt
 	Authdb.View(func(tx *bolt.Tx) error {
@@ -569,7 +560,7 @@ func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Redirect back to given page after successful login or signup.
-func loginRedir(w http.ResponseWriter, r *http.Request, name string) {
+func postRedir(w http.ResponseWriter, r *http.Request, name string) {
 	http.Redirect(w, r, name, http.StatusSeeOther)
 }
 
@@ -645,6 +636,23 @@ func newUser(username, password, role string) error {
 	}
 
 	return nil
+}
+
+func Userlist() ([]string, error) {
+	userList := []string{}
+	err := Authdb.View(func(tx *bolt.Tx) error {
+		userbucket := tx.Bucket([]byte("Users"))
+		err := userbucket.ForEach(func(key, value []byte) error {
+			//fmt.Printf("A %s is %s.\n", key, value)
+			userList = append(userList, string(key))
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return userList, err
 }
 
 func deleteUser(username string) error {
@@ -806,7 +814,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		if role != "Admin" {
 			log.Println(username + " attempting to access restricted URL.")
 			SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
-			loginRedir(w, r, "/")
+			postRedir(w, r, "/")
 			return
 		}
 
@@ -837,7 +845,7 @@ func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 		if role != "Admin" {
 			log.Println(username + " attempting to access restricted URL.")
 			SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
-			loginRedir(w, r, r.Referer())
+			postRedir(w, r, r.Referer())
 			return
 		}
 
