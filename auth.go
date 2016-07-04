@@ -752,7 +752,6 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 		if username == "" {
 			rurl := r.URL.String()
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
-			//w.Write([]byte("OMG"))
 
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -762,9 +761,8 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
-		log.Println(username + " is a " + role)
 
-		utils.Debugln(username + " is visiting " + r.Referer())
+		utils.Debugln(username + " (" + role + ") is visiting " + r.Referer())
 		//context.Set(r, UserKey, username)
 		next.ServeHTTP(w, r)
 	})
@@ -776,7 +774,6 @@ func AuthMiddleAlice(next http.Handler) http.Handler {
 		if username == "" {
 			rurl := r.URL.String()
 			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
-			//w.Write([]byte("OMG"))
 
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -786,9 +783,8 @@ func AuthMiddleAlice(next http.Handler) http.Handler {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
-		log.Println(username + " is a " + role)
 
-		utils.Debugln(username + " is visiting " + r.Referer())
+		utils.Debugln(username + " (" + role + ") is visiting " + r.Referer())
 		//context.Set(r, UserKey, username)
 		next.ServeHTTP(w, r)
 	})
@@ -800,7 +796,6 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		if username == "" {
 			rurl := r.URL.String()
 			utils.Debugln("AuthAdminMiddleware mitigating: " + r.Host + rurl)
-			//w.Write([]byte("OMG"))
 
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -809,7 +804,6 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
-		log.Println(username + " is a " + role)
 		//If user is not an Admin, just redirect to index
 		if role != "Admin" {
 			log.Println(username + " attempting to access restricted URL.")
@@ -818,8 +812,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		utils.Debugln(username + " is visiting " + r.Referer())
-		utils.Debugln(username)
+		utils.Debugln(username + " (" + role + ") is visiting " + r.Referer())
 		next.ServeHTTP(w, r)
 	})
 }
@@ -840,7 +833,6 @@ func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
-		log.Println(username + " is a " + role)
 
 		if role != "Admin" {
 			log.Println(username + " attempting to access restricted URL.")
@@ -849,8 +841,7 @@ func AuthAdminMiddleAlice(next http.Handler) http.Handler {
 			return
 		}
 
-		utils.Debugln(username + " is visiting " + r.Referer())
-		utils.Debugln(username)
+		utils.Debugln(username + " (" + role + ") is visiting " + r.Referer())
 		next.ServeHTTP(w, r)
 	})
 }
