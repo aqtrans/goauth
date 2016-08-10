@@ -3,11 +3,6 @@
 	"ignore": "test",
 	"package": [
 		{
-			"path": "github.com/boltdb/bolt",
-			"revision": "359b138d7333227aa4c76bf752881822ea21ae8a",
-			"revisionTime": "2015-01-18T07:55:06-08:00"
-		},
-		{
 			"path": "github.com/gorilla/securecookie",
 			"revision": "e95799a481bbcc3d01c2ad5178524cb8bec9f370",
 			"revisionTime": "2015-08-20T16:29:58+08:00"
