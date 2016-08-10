@@ -8,29 +8,9 @@
 			"revisionTime": "2015-01-18T07:55:06-08:00"
 		},
 		{
-			"path": "github.com/gorilla/context",
-			"revision": "215affda49addc4c8ef7e2534915df2c8c35c6cd",
-			"revisionTime": "2014-12-17T08:02:51-08:00"
-		},
-		{
 			"path": "github.com/gorilla/securecookie",
 			"revision": "e95799a481bbcc3d01c2ad5178524cb8bec9f370",
 			"revisionTime": "2015-08-20T16:29:58+08:00"
-		},
-		{
-			"path": "github.com/gorilla/sessions",
-			"revision": "aa5e036e6c44aec69a32eb41097001978b29ad31",
-			"revisionTime": "2014-06-13T12:43:57-07:00"
-		},
-		{
-			"path": "github.com/mavricknz/asn1-ber",
-			"revision": "ce3c3d1d8e4190a390fc72f551222783cbd6e55a",
-			"revisionTime": "2014-11-06T21:01:22Z"
-		},
-		{
-			"path": "github.com/mavricknz/ldap",
-			"revision": "6638977d26a6bc5ac0d2a9a5dcbefe02c456ea38",
-			"revisionTime": "2014-12-06T17:11:34Z"
 		},
 		{
 			"path": "golang.org/x/crypto/bcrypt",
@@ -41,66 +21,7 @@
 			"path": "golang.org/x/crypto/blowfish",
 			"revision": "4ed45ec682102c643324fae5dff8dab085b6c300",
 			"revisionTime": "2014-12-26T19:04:10-08:00"
-		},
-		{
-			"path": "golang.org/x/crypto/pbkdf2",
-			"revision": "4ed45ec682102c643324fae5dff8dab085b6c300",
-			"revisionTime": "2014-12-26T19:04:10-08:00"
-		},
-		{
-			"path": "golang.org/x/crypto/scrypt",
-			"revision": "4ed45ec682102c643324fae5dff8dab085b6c300",
-			"revisionTime": "2014-12-26T19:04:10-08:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/easymetric.v1/cexp",
-			"revision": "1c173222e345c2ba115e0f483821c6da2d3b0fa9",
-			"revisionTime": "2015-09-23T22:15:05+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/measurable.v1",
-			"revision": "d96a009bd9bda94dd1294105e67e8c1794e533d3",
-			"revisionTime": "2015-10-29T11:39:54Z"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/abstract",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/hash/bcrypt",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/hash/bcryptsha256",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/hash/scrypt",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/hash/scrypt/raw",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/hash/sha2crypt",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
-		},
-		{
-			"path": "gopkg.in/hlandau/passlib.v1/hash/sha2crypt/raw",
-			"revision": "006f25bd888d3b1778dcc745f476de431ad400aa",
-			"revisionTime": "2015-10-02T10:18:25+01:00"
 		}
-	]
+	],
+	"rootPath": "jba.io/go/auth"
 }
