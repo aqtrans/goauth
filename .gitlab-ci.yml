@@ -1,0 +1,80 @@
+# See docs/examples here:
+# http://doc.gitlab.com/ce/ci/quick_start/README.html
+# http://doc.gitlab.com/ce/ci/yaml/README.html
+
+# GitLab CI template for Go tests. Note this installs
+# a new working copy of Go (1.5.2 in this case) 
+# in a non-standard path such that sudo/root is not 
+# needed for the install stage.
+
+# note that this particular install-environment stage
+# is overly verbose in order to debug anything tricky
+# or weird in your environment - feel free to trim it 
+# down as needed
+
+stages:
+  - install-environment
+  - build
+#  - test
+  - deploy
+  - mirror
+
+install-go:
+  stage: install-environment
+  script:
+    - export CURRENT_BUILD_PATH=$(pwd)
+    - echo $PATH
+    - rm -rf $HOME/gopath
+    - rm -rf $HOME/golang
+    - mkdir -p $HOME/gopath/src
+    - mkdir -p $HOME/golang
+    - curl https://storage.googleapis.com/golang/go1.7rc6.linux-amd64.tar.gz 2>/dev/null > go1.7rc6.linux-amd64.tar.gz
+    - tar -C $HOME/golang -xzf go1.7rc6.linux-amd64.tar.gz
+    - export GOROOT=$HOME/golang/go
+    - export GOPATH=$HOME/gopath
+    - export PATH=$GOROOT/bin:$PATH 
+    - export PATH=$GOPATH/bin:$PATH
+    - ln -s $CI_PROJECT_DIR $GOPATH/src/auth
+    - go version
+    - echo $PATH
+    - go env
+    - which go
+
+build-my-project:
+  stage: build
+  script:
+    - export GOROOT=$HOME/golang/go
+    - export GOPATH=$HOME/gopath
+    - export PATH=$GOROOT/bin:$PATH 
+    - export PATH=$GOPATH/bin:$PATH  
+    - cd $HOME/gopath/src/auth
+    - go get -d
+    - go build
+
+#test-my-project:
+#  stage: test
+#  script:
+#    - export GOROOT=$HOME/golang/go
+#    - export GOPATH=$HOME/gopath
+#    - export PATH=$GOROOT/bin:$PATH 
+#    - export PATH=$GOPATH/bin:$PATH  
+#    - cd $HOME/gopath/src/thing
+#    - go test
+
+deploy-it:
+  stage: deploy
+  script:
+    - export GOROOT=$HOME/golang/go
+    - export GOPATH=$HOME/gopath
+    - export PATH=$GOROOT/bin:$PATH 
+    - export PATH=$GOPATH/bin:$PATH  
+    - cd $HOME/gopath/src/auth
+    - mkdir deploy
+    - go get -d
+
+mirror-to-github:
+  stage: mirror
+  only:
+    - /^github$/
+  script:
+    - git push --mirror git@github.com:aqtrans/goauth.git
