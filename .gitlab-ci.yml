@@ -75,6 +75,6 @@ deploy-it:
 mirror-to-github:
   stage: mirror
   only:
-    - /^github$/
+    - /^master$/
   script:
     - git push --mirror git@github.com:aqtrans/goauth.git
