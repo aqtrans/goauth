@@ -22,9 +22,9 @@ package auth
 // - Signup - /signup
 
 import (
-	"github.com/gorilla/securecookie"
+	
+	"context"
 	"errors"
-	"strconv"
 	"fmt"
 	"html/template"
 	"log"
@@ -32,9 +32,10 @@ import (
 	"net/url"
 	"strings"
 	"crypto/subtle"
+	"crypto/rand"
+	"encoding/base64"	
 	"github.com/boltdb/bolt"
-	"context"
-	"jba.io/go/utils"
+	"github.com/gorilla/securecookie"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -70,6 +71,23 @@ func Open(path string) *bolt.DB {
 		log.Println(err)
 	}
 	return Authdb
+}
+
+func RandBytes(n int) []byte {
+    b := make([]byte, n)
+    _, err := rand.Read(b)
+    // Note that err == nil only if we read len(b) bytes.
+    if err != nil {
+		log.Fatalln(err)
+        return nil
+    }
+    return b	
+}
+
+//RandKey generates a random string of specific length
+func RandKey(n int) string {
+	b := RandBytes(n)
+	return base64.URLEncoding.EncodeToString(b)
 }
 
 // HashPassword generates a bcrypt hash of the password using work factor 14.
@@ -133,7 +151,6 @@ func ReadSession(key string, w http.ResponseWriter, r *http.Request) (value stri
 			SetSession(key, "", w, r)
 		}
     }
-	utils.Debugln(key + " : " + value)
 	return value
 }
 
@@ -150,7 +167,6 @@ func ClearSession(key string, w http.ResponseWriter, r *http.Request) {
 }
 
 func clearFlash(w http.ResponseWriter, r *http.Request) {
-	utils.Debugln("flash cleared")
 	ClearSession("flash", w, r)
 }
 
@@ -176,7 +192,6 @@ func GetUsername(c context.Context) (username string, isAdmin bool) {
 	//defer timeTrack(time.Now(), "GetUsername")
 	userC, ok := fromUserContext(c)
 	if !ok {
-		utils.Debugln("No username in context.")
 		userC = &User{}
 	}
 	if ok {
@@ -193,7 +208,6 @@ func GetFlash(c context.Context) string {
 	var flash string
 	t, ok := fromFlashContext(c)
 	if !ok {
-		utils.Debugln("No flash in context.")
 		flash = ""
 	}
 	if ok {
@@ -207,16 +221,14 @@ func GetToken(c context.Context) string {
 	//defer timeTrack(time.Now(), "GetUsername")
 	t, ok := fromTokenContext(c)
 	if !ok {
-		utils.Debugln("No token in context.")
 		t = ""
 	}
 	return t
 }
 
 func genToken(w http.ResponseWriter, r *http.Request) string {
-	token := utils.RandKey(32)
+	token := RandKey(32)
 	SetSession("token", token, w, r)
-	utils.Debugln("genToken: " + token)
 	return token
 }
 
@@ -224,11 +236,9 @@ func genToken(w http.ResponseWriter, r *http.Request) string {
 func setToken(w http.ResponseWriter, r *http.Request) (context.Context, string) {
 	token := ReadSession("token", w, r)
 	if token == "" {
-		token = utils.RandKey(32)
+		token := RandKey(32)
 		SetSession("token", token, w, r)
-		utils.Debugln("new token generated")
 	}
-	utils.Debugln("Cookie Token: " + token)
 	return newTokenContext(r.Context(), token), token
 }
 
@@ -237,19 +247,14 @@ func CheckToken(w http.ResponseWriter, r *http.Request) error {
 	flashToken := GetToken(r.Context())
 	tmplToken := r.FormValue("token")
 	if tmplToken == "" {
-		//http.Error(w, "CSRF Blank.", 500)
-		utils.Debugln("**CSRF blank**")
 		return fmt.Errorf("CSRF Blank! flashToken: %s tmplToken: %s", flashToken, tmplToken)
 	}
 	if !verifyToken(tmplToken, flashToken) {
-		//http.Error(w, "CSRF error!", 500)
-		utils.Debugln("**CSRF mismatch!**")
 		return fmt.Errorf("CSRF Mismatch! flashToken: %s tmplToken: %s", flashToken, tmplToken)
 	}
 	// Generate a new CSRF token after this one has been used
-	newToken := utils.RandKey(32)
+	newToken := RandKey(32)
 	SetSession("token", newToken, w, r)
-	utils.Debugln("newToken: " + newToken)
 	return nil
 }
 
@@ -263,7 +268,6 @@ func UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		password := template.HTMLEscapeString(r.FormValue("password"))
 		err := newUser(username, password)
 		if err != nil {
-			utils.Debugln(err)
 			panic(err)
 		}
 
@@ -298,7 +302,6 @@ func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 
 		err = updatePass(username, hash)
 		if err != nil {
-			utils.Debugln(err)
 			panic(err)
 		}
 		SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
@@ -323,7 +326,6 @@ func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
 
 		err := deleteUser(username)
 		if err != nil {
-			utils.Debugln(err)
 			panic(err)
 		}
 		SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
@@ -348,15 +350,12 @@ func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		password := template.HTMLEscapeString(r.FormValue("password"))
 		err := newUser(username, password)
 		if err != nil {
-			utils.Debugln(err)
 			SetSession("flash", "User registration failed.", w, r)
 			postRedir(w, r, "/signup")
 			return
 		}
-
 		SetSession("flash", "Successful user registration.", w, r)
 		postRedir(w, r, "/login")
-
 		return
 
 	case "PUT":
@@ -399,17 +398,13 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		// Handle login POST request
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		referer, err := url.Parse(r.Referer())
-		if err != nil {
-			utils.Debugln(err)
-		}
+		referer, _ := url.Parse(r.Referer())
 
 		// Check if we have a ?url= query string, from AuthMiddle
 		// Otherwise, just use the referrer
 		var r2 string
 		r2 = referer.Query().Get("url")
 		if r2 == "" {
-			utils.Debugln("referer is blank")
 			r2 = r.Referer()
 			// if r.Referer is blank, just redirect to index
 			if r.Referer() == "" || referer.RequestURI() == "/login" {
@@ -420,15 +415,12 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		// Login authentication
 		if auth(username, password) {
 			SetSession("user", username, w, r)
-			utils.Debugln(username + " successfully logged in.")
 			SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
 			postRedir(w, r, r2)
 			return
 		}
-
 		SetSession("flash", "User '"+username+"' failed to login. <br> Please check your credentials and try again.", w, r)
 		postRedir(w, r, "/login")
-
 		return
 
 	case "PUT":
@@ -495,13 +487,10 @@ func boltAuth(username, password string) bool {
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
 		log.Println("error verifying password for user " + username)
-		utils.Debugln(err)
 		return false
 	}
-
-	utils.Debugln("Authenticated via Boltdb")
+	// TODO: Should look into fleshing this out
 	return true
-
 }
 
 // Check if user actually exists
@@ -523,7 +512,6 @@ func doesUserExist(username string) bool {
 
 func LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	ClearSession("user", w, r)
-	utils.Debugln("Logout")
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
@@ -669,24 +657,19 @@ func XsrfMiddle(next http.Handler) http.Handler {
 				return
 			}
 			tmplToken := r.FormValue("token")
-			utils.Debugln("POST: flashToken: " + xsrftoken)
-			utils.Debugln("POST: tmplToken: " + tmplToken)
 			// Actually check CSRF token, since this is a POST request
 			if tmplToken == "" {
 				http.Error(w, "CSRF Token Blank.", 500)
-				utils.Debugln("**CSRF Token Blank**")
 				return
 			}
 			if !verifyToken(tmplToken, xsrftoken) {
 				http.Error(w, "CSRF Token Error!", 500)
-				utils.Debugln("**CSRF Token Mismatch!**")
 				return
 			}
 
 			// If this is a POST request, and the tokens match, generate a new one
-			newToken := utils.RandKey(32)
+			newToken := RandKey(32)
 			SetSession("token", newToken, w, r)
-			utils.Debugln("newToken: " + newToken)
 
 			next.ServeHTTP(w, r)
 		default:
@@ -700,11 +683,9 @@ func XsrfMiddle(next http.Handler) http.Handler {
 func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
-		username, isAdmin := GetUsername(r.Context())
+		username, _ := GetUsername(r.Context())
 		if username == "" {
 			rurl := r.URL.String()
-			utils.Debugln("AuthMiddleware mitigating: " + r.Host + rurl)
-
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
 				panic("AuthMiddle is in an endless redirect loop")
@@ -713,8 +694,6 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
 		}
-
-		utils.Debugln(username + " (is Admin: " + strconv.FormatBool(isAdmin) + ") is visiting " + r.Referer())
 		next.ServeHTTP(w, r)
 	})
 }
@@ -724,8 +703,6 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		username, isAdmin := GetUsername(r.Context())
 		if username == "" {
 			rurl := r.URL.String()
-			utils.Debugln("AuthAdminMiddleware mitigating: " + r.Host + rurl)
-
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
 				panic("AuthAdminMiddle is in an endless redirect loop")
@@ -740,8 +717,6 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 			postRedir(w, r, "/")
 			return
 		}
-
-		utils.Debugln(username + " (is Admin: " + strconv.FormatBool(isAdmin) + ") is visiting " + r.Referer())
 		next.ServeHTTP(w, r)
 	})
 }
@@ -763,7 +738,6 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 		// If username is the configured AdminUser, set context to reflect this
 		isAdmin := false
 		if username == AdminUser {
-			utils.Debugln("Setting isAdmin to true due to "+ AdminUser)
 			isAdmin = true
 		}
 		u := &User{
@@ -783,11 +757,9 @@ func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		username := getUsernameFromCookie(r, w)
 		if username == "" {
-			utils.Debugln("AuthMiddleware mitigating: " + r.Host + r.URL.String())
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+r.URL.String(), 302)
 			return
 		}
-		utils.Debugln(username + " is visiting " + r.Referer())
 		next.ServeHTTP(w, r)
 	}
 	return http.HandlerFunc(handler)
