@@ -3,6 +3,12 @@
 	"ignore": "test",
 	"package": [
 		{
+			"checksumSHA1": "SOlzXbE84I33ISmxg0g/clBf+1k=",
+			"path": "github.com/boltdb/bolt",
+			"revision": "94c8db596809690a3f7046fa83c7b0dda13a3222",
+			"revisionTime": "2016-07-30T14:44:16Z"
+		},
+		{
 			"path": "github.com/gorilla/securecookie",
 			"revision": "e95799a481bbcc3d01c2ad5178524cb8bec9f370",
 			"revisionTime": "2015-08-20T16:29:58+08:00"
@@ -16,6 +22,12 @@
 			"path": "golang.org/x/crypto/blowfish",
 			"revision": "4ed45ec682102c643324fae5dff8dab085b6c300",
 			"revisionTime": "2014-12-26T19:04:10-08:00"
+		},
+		{
+			"checksumSHA1": "15doxxBfOxOhWExkxjPNo6Y7fEw=",
+			"path": "golang.org/x/sys/unix",
+			"revision": "833a04a10549a95dc34458c195cbad61bbb6cb4d",
+			"revisionTime": "2015-12-11T01:34:15Z"
 		}
 	],
 	"rootPath": "jba.io/go/auth"
