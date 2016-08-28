@@ -16,27 +16,21 @@ package auth
 //  XSRF:
 //   - Cross-site Request Forgery protection, using the same concept I use for auth functions above
 
-// Required URLs:
-// This lib only handles POST requests on the following URLs
-// - Login - /login
-// - Signup - /signup
-
 import (
-	
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/boltdb/bolt"
+	"github.com/gorilla/securecookie"
+	"golang.org/x/crypto/bcrypt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
-	"crypto/subtle"
-	"crypto/rand"
-	"encoding/base64"	
-	"github.com/boltdb/bolt"
-	"github.com/gorilla/securecookie"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type key int
@@ -45,43 +39,46 @@ const TokenKey key = 0
 const UserKey key = 1
 const MsgKey key = 2
 
+type AuthDB struct {
+	*bolt.DB
+}
+
 type User struct {
 	Username string
 	IsAdmin  bool
 }
 
 type Flash struct {
-	Msg	 string
+	Msg string
 }
 
-type Token   string
+type Token string
 
 var (
-	AdminUser string
-	Authdb *bolt.DB
+	AdminUser      string
+	Authdb         *AuthDB
 	sCookieHandler = securecookie.New(
 		[]byte("5CO4mHhkuV4BVDZT72pfkNxVhxOMHMN9lTZjGihKJoNWOUQf5j32NF2nx8RQypUh"),
 		[]byte("YuBmqpu4I40ObfPHw0gl7jeF88bk4eT4"))
 )
 
-func Open(path string) *bolt.DB {
-	var err error
-	Authdb, err = bolt.Open(path, 0600, nil)
+func Open(path string) *AuthDB {
+	db, err := bolt.Open(path, 0600, nil)
 	if err != nil {
 		log.Println(err)
 	}
-	return Authdb
+	return &AuthDB{db}
 }
 
 func RandBytes(n int) []byte {
-    b := make([]byte, n)
-    _, err := rand.Read(b)
-    // Note that err == nil only if we read len(b) bytes.
-    if err != nil {
+	b := make([]byte, n)
+	_, err := rand.Read(b)
+	// Note that err == nil only if we read len(b) bytes.
+	if err != nil {
 		log.Fatalln(err)
-        return nil
-    }
-    return b	
+		return nil
+	}
+	return b
 }
 
 //RandKey generates a random string of specific length
@@ -132,25 +129,25 @@ func fromTokenContext(c context.Context) (string, bool) {
 // Currently used for username and CSRF tokens
 func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 
-    if encoded, err := sCookieHandler.Encode(key, val); err == nil {
-        cookie := &http.Cookie{
-            Name:  key,
-            Value: encoded,
-            Path:  "/",
-        }
-        http.SetCookie(w, cookie)
-    }
-	
+	if encoded, err := sCookieHandler.Encode(key, val); err == nil {
+		cookie := &http.Cookie{
+			Name:  key,
+			Value: encoded,
+			Path:  "/",
+		}
+		http.SetCookie(w, cookie)
+	}
+
 }
 
 func ReadSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
-    if cookie, err := r.Cookie(key); err == nil {
+	if cookie, err := r.Cookie(key); err == nil {
 		err := sCookieHandler.Decode(key, cookie.Value, &value)
 		if err != nil {
 			log.Println("Error decoding cookie " + key + " value")
 			SetSession(key, "", w, r)
 		}
-    }
+	}
 	return value
 }
 
@@ -163,7 +160,7 @@ func SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
 // ClearSession currently only clearing the user value
 // The CSRF token should always be around due to the login form and such
 func ClearSession(key string, w http.ResponseWriter, r *http.Request) {
-    SetSession(key, "", w, r)
+	SetSession(key, "", w, r)
 }
 
 func clearFlash(w http.ResponseWriter, r *http.Request) {
@@ -506,7 +503,7 @@ func doesUserExist(username string) bool {
 	})
 	if err == nil {
 		return true
-	} 
+	}
 	return false
 }
 
@@ -638,7 +635,7 @@ func updatePass(username string, hash []byte) error {
 }
 
 //XsrfMiddle is a middleware that tries (no guarantees) to protect against Cross-Site Request Forgery
-// On GET requests, it takes a 
+// On GET requests, it takes a
 func XsrfMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if there's an existing xsrf
@@ -727,14 +724,14 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username := getUsernameFromCookie(r, w)
 		message := getFlashFromCookie(r, w)
-		
+
 		// Check if user actually exists before setting username
 		// If user does not exist, clear the session because something fishy is going on
 		if !doesUserExist(username) {
 			username = ""
 			ClearSession("user", w, r)
 		}
-		
+
 		// If username is the configured AdminUser, set context to reflect this
 		isAdmin := false
 		if username == AdminUser {
@@ -742,7 +739,7 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 		}
 		u := &User{
 			Username: username,
-			IsAdmin: isAdmin,
+			IsAdmin:  isAdmin,
 		}
 		f := &Flash{
 			Msg: message,
@@ -780,7 +777,7 @@ func AuthDbInit() error {
 
 		userbucketUser := userbucket.Get([]byte(adminUser))
 		if userbucketUser == nil {
-			fmt.Println("Admin Boltdb user "+ adminUser +" does not exist, creating it.")
+			fmt.Println("Admin Boltdb user " + adminUser + " does not exist, creating it.")
 			//hash, err := passlib.Hash("admin")
 			hash, err := HashPassword([]byte("admin"))
 			if err != nil {
@@ -795,7 +792,7 @@ func AuthDbInit() error {
 			}
 
 			fmt.Println("***DEFAULT USER CREDENTIALS:***")
-			fmt.Println("Username: "+ adminUser)
+			fmt.Println("Username: " + adminUser)
 			fmt.Println("Password: admin")
 			return nil
 		}
