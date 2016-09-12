@@ -199,6 +199,19 @@ func GetUsername(c context.Context) (username string, isAdmin bool) {
 	return username, isAdmin
 }
 
+// IsLoggedIn takes a context, tries to fetch user{} from it,
+//  and if that succeeds, verifies the username fetched actually exists
+func IsLoggedIn(c context.Context) bool {
+	userC, ok := fromUserContext(c)
+	if ok {
+		// If username is in a context, and that user exists, return true
+		if doesUserExist(userC.Username) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetFlash retrieves token from context
 func GetFlash(c context.Context) string {
 	//defer timeTrack(time.Now(), "GetUsername")
@@ -680,8 +693,9 @@ func XsrfMiddle(next http.Handler) http.Handler {
 func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
-		username, _ := GetUsername(r.Context())
-		if username == "" {
+		//username, _ := GetUsername(r.Context())
+		//if username == "" {
+		if IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -698,7 +712,8 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, isAdmin := GetUsername(r.Context())
-		if username == "" {
+		//if username == "" {
+		if IsLoggedIn(r.Context()) {	
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
