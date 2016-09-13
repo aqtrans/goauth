@@ -517,6 +517,9 @@ func doesUserExist(username string) bool {
 	if err == nil {
 		return true
 	}
+	if err != nil {
+		log.Println(err)
+	}
 	return false
 }
 
