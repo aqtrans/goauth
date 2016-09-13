@@ -205,7 +205,7 @@ func IsLoggedIn(c context.Context) bool {
 	userC, ok := fromUserContext(c)
 	if ok {
 		// If username is in a context, and that user exists, return true
-		if doesUserExist(userC.Username) {
+		if userC.Username != "" && doesUserExist(userC.Username) {
 			return true
 		}
 	}
@@ -695,7 +695,7 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//username := getUsernameFromCookie(r)
 		//username, _ := GetUsername(r.Context())
 		//if username == "" {
-		if IsLoggedIn(r.Context()) {
+		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -713,7 +713,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, isAdmin := GetUsername(r.Context())
 		//if username == "" {
-		if IsLoggedIn(r.Context()) {	
+		if !IsLoggedIn(r.Context()) {	
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
