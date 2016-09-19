@@ -56,6 +56,7 @@ type Token string
 
 var (
 	AdminUser      string
+	AdminPass      string
 	Authdb         *AuthDB
 	sCookieHandler = securecookie.New(
 		[]byte("5CO4mHhkuV4BVDZT72pfkNxVhxOMHMN9lTZjGihKJoNWOUQf5j32NF2nx8RQypUh"),
@@ -792,12 +793,16 @@ func AuthDbInit() error {
 		if adminUser == "" {
 			adminUser = "admin"
 		}
+		adminPass := AdminPass
+		if adminPass == "" {
+			adminPass = "admin"
+		}		
 
 		userbucketUser := userbucket.Get([]byte(adminUser))
 		if userbucketUser == nil {
 			fmt.Println("Admin Boltdb user " + adminUser + " does not exist, creating it.")
 			//hash, err := passlib.Hash("admin")
-			hash, err := HashPassword([]byte("admin"))
+			hash, err := HashPassword([]byte(adminPass))
 			if err != nil {
 				// couldn't hash password for some reason
 				log.Fatalln(err)
@@ -811,7 +816,7 @@ func AuthDbInit() error {
 
 			fmt.Println("***DEFAULT USER CREDENTIALS:***")
 			fmt.Println("Username: " + adminUser)
-			fmt.Println("Password: admin")
+			fmt.Println("Password: " + adminPass)
 			return nil
 		}
 		return nil
