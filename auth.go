@@ -39,6 +39,8 @@ const TokenKey key = 0
 const UserKey key = 1
 const MsgKey key = 2
 
+var UserDoesntExist = errors.New("User does not exist")
+
 type AuthDB struct {
 	*bolt.DB
 }
@@ -486,8 +488,8 @@ func boltAuth(username, password string) bool {
 		b := tx.Bucket([]byte("Users"))
 		v := b.Get([]byte(username))
 		if v == nil {
-			err := errors.New("User does not exist")
-			log.Println(err)
+			err := UserDoesntExist
+			//log.Println(err)
 			return err
 		}
 		hashedUserPassByte = v
@@ -510,7 +512,7 @@ func doesUserExist(username string) bool {
 		b := tx.Bucket([]byte("Users"))
 		v := b.Get([]byte(username))
 		if v == nil {
-			err := errors.New("User does not exist")
+			err := UserDoesntExist
 			return err
 		}
 		return nil
@@ -518,7 +520,7 @@ func doesUserExist(username string) bool {
 	if err == nil {
 		return true
 	}
-	if err != nil {
+	if err != nil && err != UserDoesntExist {
 		log.Println(err)
 	}
 	return false
@@ -637,7 +639,7 @@ func updatePass(username string, hash []byte) error {
 
 		// userbucketUser should be nil if user doesn't exist
 		if userbucketUser == nil {
-			err := errors.New("User does not exist")
+			err := UserDoesntExist
 			log.Println(err)
 			return err
 		}
