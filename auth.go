@@ -23,14 +23,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/boltdb/bolt"
-	"github.com/gorilla/securecookie"
-	"golang.org/x/crypto/bcrypt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/boltdb/bolt"
+	"github.com/gorilla/securecookie"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type key int
@@ -63,6 +64,7 @@ var (
 	sCookieHandler = securecookie.New(
 		[]byte("5CO4mHhkuV4BVDZT72pfkNxVhxOMHMN9lTZjGihKJoNWOUQf5j32NF2nx8RQypUh"),
 		[]byte("YuBmqpu4I40ObfPHw0gl7jeF88bk4eT4"))
+	Debug = false
 )
 
 func Open(path string) *AuthDB {
@@ -211,6 +213,9 @@ func IsLoggedIn(c context.Context) bool {
 		if userC.Username != "" && doesUserExist(userC.Username) {
 			return true
 		}
+	}
+	if !ok {
+		log.Println("Error IsLoggedIn not OK")
 	}
 	return false
 }
@@ -719,7 +724,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, isAdmin := GetUsername(r.Context())
 		//if username == "" {
-		if !IsLoggedIn(r.Context()) {	
+		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -798,11 +803,11 @@ func AuthDbInit() error {
 		adminPass := AdminPass
 		if adminPass == "" {
 			adminPass = "admin"
-		}		
+		}
 
 		userbucketUser := userbucket.Get([]byte(adminUser))
 		if userbucketUser == nil {
-			fmt.Println("Admin Boltdb user " + adminUser + " does not exist, creating it.")
+
 			//hash, err := passlib.Hash("admin")
 			hash, err := HashPassword([]byte(adminPass))
 			if err != nil {
@@ -815,10 +820,13 @@ func AuthDbInit() error {
 				log.Println(err)
 				return err
 			}
+			if Debug {
+				fmt.Println("Admin Boltdb user " + adminUser + " does not exist, creating it.")
+				fmt.Println("***DEFAULT USER CREDENTIALS:***")
+				fmt.Println("Username: " + adminUser)
+				fmt.Println("Password: " + adminPass)
+			}
 
-			fmt.Println("***DEFAULT USER CREDENTIALS:***")
-			fmt.Println("Username: " + adminUser)
-			fmt.Println("Password: " + adminPass)
 			return nil
 		}
 		return nil
