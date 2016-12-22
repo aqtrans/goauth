@@ -58,12 +58,14 @@ type Flash struct {
 type Token string
 
 var (
-	AdminUser      string
-	AdminPass      string
-	Authdb         *AuthDB
-	sCookieHandler = securecookie.New(
-		[]byte("5CO4mHhkuV4BVDZT72pfkNxVhxOMHMN9lTZjGihKJoNWOUQf5j32NF2nx8RQypUh"),
-		[]byte("YuBmqpu4I40ObfPHw0gl7jeF88bk4eT4"))
+	AdminUser     string
+	AdminPass     string
+	Authdb        *AuthDB
+	HashKey       = RandBytes(64)
+	BlockKey      = RandBytes(32)
+	cookieHandler = securecookie.New(
+		HashKey,
+		BlockKey)
 	Debug = false
 )
 
@@ -89,7 +91,7 @@ func RandBytes(n int) []byte {
 //RandKey generates a random string of specific length
 func RandKey(n int) string {
 	b := RandBytes(n)
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // HashPassword generates a bcrypt hash of the password using work factor 14.
@@ -134,7 +136,7 @@ func fromTokenContext(c context.Context) (string, bool) {
 // Currently used for username and CSRF tokens
 func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 
-	if encoded, err := sCookieHandler.Encode(key, val); err == nil {
+	if encoded, err := cookieHandler.Encode(key, val); err == nil {
 		cookie := &http.Cookie{
 			Name:  key,
 			Value: encoded,
@@ -147,7 +149,7 @@ func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 
 func ReadSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
 	if cookie, err := r.Cookie(key); err == nil {
-		err := sCookieHandler.Decode(key, cookie.Value, &value)
+		err := cookieHandler.Decode(key, cookie.Value, &value)
 		if err != nil {
 			log.Println("Error decoding cookie " + key + " value")
 			SetSession(key, "", w, r)
