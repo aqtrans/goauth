@@ -1,0 +1,13 @@
+{
+    "dependencies": {
+        "github.com/boltdb/bolt": {
+            "branch": "master"
+        },
+        "github.com/gorilla/securecookie": {
+            "branch": "master"
+        },
+        "golang.org/x/crypto": {
+            "branch": "master"
+        }
+    }
+}
