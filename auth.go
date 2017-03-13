@@ -1,5 +1,7 @@
 package auth
 
+// 03/12/2017 - Massive revamp, using a 'state' instead of variables
+//    - Based on https://github.com/xyproto/permissionbolt/
 // **Currently using plain "context" package included in Go 1.7, so not backwards compatible**
 
 //Auth functions
@@ -15,6 +17,7 @@ package auth
 //
 //  XSRF:
 //   - Cross-site Request Forgery protection, using the same concept I use for auth functions above
+//   - I personally migrated to gorilla/csrf, as it's go1.7/context compatible and easy to use
 
 import (
 	"context"
@@ -28,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/gorilla/securecookie"
@@ -40,10 +44,21 @@ const TokenKey key = 0
 const UserKey key = 1
 const MsgKey key = 2
 
+var AuthInfoBucketName = []byte("AuthInfo")
+var HashKeyName = []byte("HashKey")
+var BlockKeyName = []byte("BlockKey")
+var UserInfoBucketName = []byte("Users")
+
 var UserDoesntExist = errors.New("User does not exist")
 
-type AuthDB struct {
-	*bolt.DB
+type AuthState struct {
+	boltdb *bolt.DB
+	cookie *securecookie.SecureCookie
+}
+
+type authInfo struct {
+	hashKey  []byte
+	blockKey []byte
 }
 
 type User struct {
@@ -58,23 +73,28 @@ type Flash struct {
 type Token string
 
 var (
-	AdminUser     string
-	AdminPass     string
-	Authdb        *AuthDB
-	HashKey       = RandBytes(64)
-	BlockKey      = RandBytes(32)
-	cookieHandler = securecookie.New(
-		HashKey,
-		BlockKey)
-	Debug = false
+	AdminUser = "admin"
+	AdminPass = "admin"
+	Debug     = false
 )
 
-func Open(path string) *AuthDB {
-	db, err := bolt.Open(path, 0600, nil)
+func NewAuthState(path string) (*AuthState, error) {
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+
+	state := new(AuthState)
+	state.boltdb = db
+	err = state.dbInit()
 	if err != nil {
 		log.Println(err)
 	}
-	return &AuthDB{db}
+
+	hash, block := state.getAuthInfo()
+	state.cookie = securecookie.New(hash, block)
+
+	return state, nil
 }
 
 func RandBytes(n int) []byte {
@@ -134,9 +154,9 @@ func fromTokenContext(c context.Context) (string, bool) {
 
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for username and CSRF tokens
-func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
+func (state *AuthState) SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 
-	if encoded, err := cookieHandler.Encode(key, val); err == nil {
+	if encoded, err := state.cookie.Encode(key, val); err == nil {
 		cookie := &http.Cookie{
 			Name:  key,
 			Value: encoded,
@@ -147,12 +167,12 @@ func SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 
 }
 
-func ReadSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
+func (state *AuthState) ReadSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
 	if cookie, err := r.Cookie(key); err == nil {
-		err := cookieHandler.Decode(key, cookie.Value, &value)
+		err := state.cookie.Decode(key, cookie.Value, &value)
 		if err != nil {
 			log.Println("Error decoding cookie " + key + " value")
-			SetSession(key, "", w, r)
+			state.SetSession(key, "", w, r)
 		}
 	}
 	return value
@@ -160,35 +180,35 @@ func ReadSession(key string, w http.ResponseWriter, r *http.Request) (value stri
 
 // SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
 //   middleware, pushes the message into context and then template
-func SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
-	SetSession("flash", msg, w, r)
+func (state *AuthState) SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
+	state.SetSession("flash", msg, w, r)
 }
 
 // ClearSession currently only clearing the user value
 // The CSRF token should always be around due to the login form and such
-func ClearSession(key string, w http.ResponseWriter, r *http.Request) {
-	SetSession(key, "", w, r)
+func (state *AuthState) ClearSession(key string, w http.ResponseWriter, r *http.Request) {
+	state.SetSession(key, "", w, r)
 }
 
-func clearFlash(w http.ResponseWriter, r *http.Request) {
-	ClearSession("flash", w, r)
+func (state *AuthState) clearFlash(w http.ResponseWriter, r *http.Request) {
+	state.ClearSession("flash", w, r)
 }
 
-func getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
-	return ReadSession("user", w, r)
+func (state *AuthState) getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
+	return state.ReadSession("user", w, r)
 }
 
-func getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
-	message = ReadSession("flash", w, r)
+func (state *AuthState) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
+	message = state.ReadSession("flash", w, r)
 	if message != "" {
-		clearFlash(w, r)
+		state.clearFlash(w, r)
 	}
 	return message
 }
 
 // Retrieve a token
-func getTokenFromCookie(r *http.Request, w http.ResponseWriter) (token string) {
-	return ReadSession("token", w, r)
+func (state *AuthState) getTokenFromCookie(r *http.Request, w http.ResponseWriter) (token string) {
+	return state.ReadSession("token", w, r)
 }
 
 // GetUsername retrieves username, and admin bool from context
@@ -208,11 +228,11 @@ func GetUsername(c context.Context) (username string, isAdmin bool) {
 
 // IsLoggedIn takes a context, tries to fetch user{} from it,
 //  and if that succeeds, verifies the username fetched actually exists
-func IsLoggedIn(c context.Context) bool {
+func (state *AuthState) IsLoggedIn(c context.Context) bool {
 	userC, ok := fromUserContext(c)
 	if ok {
 		// If username is in a context, and that user exists, return true
-		if userC.Username != "" && doesUserExist(userC.Username) {
+		if userC.Username != "" && state.doesUserExist(userC.Username) {
 			return true
 		}
 	}
@@ -246,24 +266,24 @@ func GetToken(c context.Context) string {
 	return t
 }
 
-func genToken(w http.ResponseWriter, r *http.Request) string {
+func (state *AuthState) genToken(w http.ResponseWriter, r *http.Request) string {
 	token := RandKey(32)
-	SetSession("token", token, w, r)
+	state.SetSession("token", token, w, r)
 	return token
 }
 
 // Only set a new token if one doesn't already exist
-func setToken(w http.ResponseWriter, r *http.Request) (context.Context, string) {
-	token := ReadSession("token", w, r)
+func (state *AuthState) setToken(w http.ResponseWriter, r *http.Request) (context.Context, string) {
+	token := state.ReadSession("token", w, r)
 	if token == "" {
 		token := RandKey(32)
-		SetSession("token", token, w, r)
+		state.SetSession("token", token, w, r)
 	}
 	return newTokenContext(r.Context(), token), token
 }
 
 // CheckToken if given an http.Request with a token input, compare it to the token in the session cookie
-func CheckToken(w http.ResponseWriter, r *http.Request) error {
+func (state *AuthState) CheckToken(w http.ResponseWriter, r *http.Request) error {
 	flashToken := GetToken(r.Context())
 	tmplToken := r.FormValue("token")
 	if tmplToken == "" {
@@ -274,24 +294,24 @@ func CheckToken(w http.ResponseWriter, r *http.Request) error {
 	}
 	// Generate a new CSRF token after this one has been used
 	newToken := RandKey(32)
-	SetSession("token", newToken, w, r)
+	state.SetSession("token", newToken, w, r)
 	return nil
 }
 
 //UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *AuthState) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := newUser(username, password)
+		err := state.newUser(username, password)
 		if err != nil {
 			panic(err)
 		}
 
-		SetSession("flash", "Successfully added '"+username+"' user.", w, r)
+		state.SetSession("flash", "Successfully added '"+username+"' user.", w, r)
 		postRedir(w, r, r.Referer())
 
 	case "PUT":
@@ -305,7 +325,7 @@ func UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 
 //AdminUserPassChangePostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *AuthState) AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
@@ -320,11 +340,11 @@ func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err = updatePass(username, hash)
+		err = state.updatePass(username, hash)
 		if err != nil {
 			panic(err)
 		}
-		SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
+		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
 		postRedir(w, r, r.Referer())
 
 	case "PUT":
@@ -338,17 +358,17 @@ func AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
 
 //AdminUserDeletePostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *AuthState) AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 
-		err := deleteUser(username)
+		err := state.deleteUser(username)
 		if err != nil {
 			panic(err)
 		}
-		SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
+		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
 		postRedir(w, r, r.Referer())
 
 	case "PUT":
@@ -362,19 +382,19 @@ func AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
 
 //SignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *AuthState) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := newUser(username, password)
+		err := state.newUser(username, password)
 		if err != nil {
-			SetSession("flash", "User registration failed.", w, r)
+			state.SetSession("flash", "User registration failed.", w, r)
 			postRedir(w, r, "/signup")
 			return
 		}
-		SetSession("flash", "Successful user registration.", w, r)
+		state.SetSession("flash", "Successful user registration.", w, r)
 		postRedir(w, r, "/login")
 		return
 
@@ -389,7 +409,7 @@ func SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
 // Comparing values with LDAP or configured username/password combos
-func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *AuthState) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
@@ -433,13 +453,13 @@ func LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Login authentication
-		if auth(username, password) {
-			SetSession("user", username, w, r)
-			SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
+		if state.auth(username, password) {
+			state.SetSession("user", username, w, r)
+			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
 			postRedir(w, r, r2)
 			return
 		}
-		SetSession("flash", "User '"+username+"' failed to login. <br> Please check your credentials and try again.", w, r)
+		state.SetSession("flash", "User '"+username+"' failed to login. <br> Please check your credentials and try again.", w, r)
 		postRedir(w, r, "/login")
 		return
 
@@ -477,22 +497,22 @@ func ldapAuth(un, pw string) bool {
 */
 
 // Bundle of all auth functions, checking which are enabled
-func auth(username, password string) bool {
-	return boltAuth(username, password)
+func (state *AuthState) auth(username, password string) bool {
+	return state.boltAuth(username, password)
 }
 
-func boltAuth(username, password string) bool {
+func (state *AuthState) boltAuth(username, password string) bool {
 
 	// Catch non-existent users before wasting CPU cycles checking hashes
-	if !doesUserExist(username) {
+	if !state.doesUserExist(username) {
 		log.Println(username + " does not exist but trying to login.")
 		return false
 	}
 
 	var hashedUserPassByte []byte
 	// Grab given user's password from Bolt
-	Authdb.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("Users"))
+	state.boltdb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(UserInfoBucketName)
 		v := b.Get([]byte(username))
 		if v == nil {
 			err := UserDoesntExist
@@ -514,9 +534,9 @@ func boltAuth(username, password string) bool {
 }
 
 // Check if user actually exists
-func doesUserExist(username string) bool {
-	err := Authdb.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("Users"))
+func (state *AuthState) doesUserExist(username string) bool {
+	err := state.boltdb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(UserInfoBucketName))
 		v := b.Get([]byte(username))
 		if v == nil {
 			err := UserDoesntExist
@@ -533,8 +553,21 @@ func doesUserExist(username string) bool {
 	return false
 }
 
-func LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	ClearSession("user", w, r)
+func (state *AuthState) getAuthInfo() (hashkey, blockkey []byte) {
+	err := state.boltdb.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(AuthInfoBucketName)
+		hashkey = b.Get(HashKeyName)
+		blockkey = b.Get(BlockKeyName)
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+	return hashkey, blockkey
+}
+
+func (state *AuthState) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	state.ClearSession("user", w, r)
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
@@ -550,7 +583,7 @@ func verifyToken(realToken, sentToken string) bool {
 
 // Dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
-func newUser(username, password string) error {
+func (state *AuthState) newUser(username, password string) error {
 
 	// Hash password now so if it fails we catch it before touching Bolt
 	//hash, err := passlib.Hash(password)
@@ -562,8 +595,8 @@ func newUser(username, password string) error {
 	}
 
 	// If no existing user, store username and hash
-	viewerr := Authdb.View(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte("Users"))
+	viewerr := state.boltdb.View(func(tx *bolt.Tx) error {
+		userbucket := tx.Bucket(UserInfoBucketName)
 
 		userbucketUser := userbucket.Get([]byte(username))
 
@@ -580,7 +613,7 @@ func newUser(username, password string) error {
 	}
 
 	//var vb []byte
-	adderr := Authdb.Update(func(tx *bolt.Tx) error {
+	adderr := state.boltdb.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte("Users"))
 
 		userbucketUser := userbucket.Get([]byte(username))
@@ -608,10 +641,10 @@ func newUser(username, password string) error {
 	return nil
 }
 
-func Userlist() ([]string, error) {
+func (state *AuthState) Userlist() ([]string, error) {
 	userList := []string{}
-	err := Authdb.View(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte("Users"))
+	err := state.boltdb.View(func(tx *bolt.Tx) error {
+		userbucket := tx.Bucket(UserInfoBucketName)
 		err := userbucket.ForEach(func(key, value []byte) error {
 			//fmt.Printf("A %s is %s.\n", key, value)
 			userList = append(userList, string(key))
@@ -625,10 +658,10 @@ func Userlist() ([]string, error) {
 	return userList, err
 }
 
-func deleteUser(username string) error {
-	err := Authdb.Update(func(tx *bolt.Tx) error {
+func (state *AuthState) deleteUser(username string) error {
+	err := state.boltdb.Update(func(tx *bolt.Tx) error {
 		log.Println(username + " has been deleted")
-		return tx.Bucket([]byte("Users")).Delete([]byte(username))
+		return tx.Bucket(UserInfoBucketName).Delete([]byte(username))
 	})
 	if err != nil {
 		log.Println(err)
@@ -637,11 +670,11 @@ func deleteUser(username string) error {
 	return err
 }
 
-func updatePass(username string, hash []byte) error {
+func (state *AuthState) updatePass(username string, hash []byte) error {
 
 	// Update password only if user exists
-	Authdb.Update(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte("Users"))
+	state.boltdb.Update(func(tx *bolt.Tx) error {
+		userbucket := tx.Bucket(UserInfoBucketName)
 		userbucketUser := userbucket.Get([]byte(username))
 
 		// userbucketUser should be nil if user doesn't exist
@@ -660,55 +693,12 @@ func updatePass(username string, hash []byte) error {
 	return nil
 }
 
-//XsrfMiddle is a middleware that tries (no guarantees) to protect against Cross-Site Request Forgery
-// On GET requests, it takes a
-func XsrfMiddle(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if there's an existing xsrf
-		// If not, generate one in the cookie
-		reqcx, xsrftoken := setToken(w, r)
-		switch r.Method {
-		case "GET":
-			// If this is a GET request, go ahead and serve the next, with reqcx
-			next.ServeHTTP(w, r.WithContext(reqcx))
-		case "POST", "PUT", "DELETE":
-			// Currently doing CLI checking by user-agent, only excluding curl
-			// TODO: Probably a more secure way to do this..special header set in config maybe?
-			// This should mean this is a request from the command line, so don't check CSRF
-			if strings.HasPrefix(r.UserAgent(), "curl") {
-				next.ServeHTTP(w, r)
-				return
-			}
-			tmplToken := r.FormValue("token")
-			// Actually check CSRF token, since this is a POST request
-			if tmplToken == "" {
-				http.Error(w, "CSRF Token Blank.", 500)
-				return
-			}
-			if !verifyToken(tmplToken, xsrftoken) {
-				http.Error(w, "CSRF Token Error!", 500)
-				return
-			}
-
-			// If this is a POST request, and the tokens match, generate a new one
-			newToken := RandKey(32)
-			SetSession("token", newToken, w, r)
-
-			next.ServeHTTP(w, r)
-		default:
-
-			next.ServeHTTP(w, r)
-		}
-
-	})
-}
-
-func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
+func (state *AuthState) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		//username := getUsernameFromCookie(r)
 		//username, _ := GetUsername(r.Context())
 		//if username == "" {
-		if !IsLoggedIn(r.Context()) {
+		if !state.IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -722,11 +712,11 @@ func AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
-func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
+func (state *AuthState) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, isAdmin := GetUsername(r.Context())
 		//if username == "" {
-		if !IsLoggedIn(r.Context()) {
+		if !state.IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -738,7 +728,7 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//If user is not an Admin, just redirect to index
 		if !isAdmin {
 			log.Println(username + " attempting to access restricted URL.")
-			SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
+			state.SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
 			postRedir(w, r, "/")
 			return
 		}
@@ -748,16 +738,16 @@ func AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 
 //UserEnvMiddle grabs username, role, and flash message from cookie,
 // tosses it into the context for use in various other middlewares
-func UserEnvMiddle(next http.Handler) http.Handler {
+func (state *AuthState) UserEnvMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username := getUsernameFromCookie(r, w)
-		message := getFlashFromCookie(r, w)
+		username := state.getUsernameFromCookie(r, w)
+		message := state.getFlashFromCookie(r, w)
 
 		// Check if user actually exists before setting username
 		// If user does not exist, clear the session because something fishy is going on
-		if !doesUserExist(username) {
+		if !state.doesUserExist(username) {
 			username = ""
-			ClearSession("user", w, r)
+			state.ClearSession("user", w, r)
 		}
 
 		// If username is the configured AdminUser, set context to reflect this
@@ -778,9 +768,9 @@ func UserEnvMiddle(next http.Handler) http.Handler {
 	})
 }
 
-func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
+func (state *AuthState) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		username := getUsernameFromCookie(r, w)
+		username := state.getUsernameFromCookie(r, w)
 		if username == "" {
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+r.URL.String(), 302)
 			return
@@ -790,44 +780,64 @@ func AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(handler)
 }
 
-func AuthDbInit() error {
+func (state *AuthState) dbInit() error {
 
-	return Authdb.Update(func(tx *bolt.Tx) error {
-		userbucket, err := tx.CreateBucketIfNotExists([]byte("Users"))
+	return state.boltdb.Update(func(tx *bolt.Tx) error {
+		userbucket, err := tx.CreateBucketIfNotExists(UserInfoBucketName)
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
 
-		adminUser := AdminUser
-		if adminUser == "" {
-			adminUser = "admin"
-		}
-		adminPass := AdminPass
-		if adminPass == "" {
-			adminPass = "admin"
+		infobucket, err := tx.CreateBucketIfNotExists(AuthInfoBucketName)
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
 		}
 
-		userbucketUser := userbucket.Get([]byte(adminUser))
+		hashKey := infobucket.Get(HashKeyName)
+		if hashKey == nil {
+			log.Println("Throwing hashkey into auth.db.")
+			// Generate a random hashKey
+			hashKey := RandBytes(64)
+
+			err = infobucket.Put(HashKeyName, hashKey)
+			if err != nil {
+				log.Println(err)
+				return err
+			}
+		}
+
+		blockKey := infobucket.Get(BlockKeyName)
+		if blockKey == nil {
+			log.Println("Throwing blockkey into auth.db.")
+			// Generate a random blockKey
+			blockKey := RandBytes(32)
+
+			err = infobucket.Put(BlockKeyName, blockKey)
+			if err != nil {
+				log.Println(err)
+				return err
+			}
+		}
+
+		userbucketUser := userbucket.Get([]byte(AdminUser))
 		if userbucketUser == nil {
 
 			//hash, err := passlib.Hash("admin")
-			hash, err := HashPassword([]byte(adminPass))
+			hash, err := HashPassword([]byte(AdminPass))
 			if err != nil {
 				// couldn't hash password for some reason
 				log.Fatalln(err)
 				return err
 			}
-			err = userbucket.Put([]byte(adminUser), []byte(hash))
+			err = userbucket.Put([]byte(AdminUser), []byte(hash))
 			if err != nil {
 				log.Println(err)
 				return err
 			}
-			if Debug {
-				fmt.Println("Admin Boltdb user " + adminUser + " does not exist, creating it.")
-				fmt.Println("***DEFAULT USER CREDENTIALS:***")
-				fmt.Println("Username: " + adminUser)
-				fmt.Println("Password: " + adminPass)
-			}
+			log.Println("Admin Boltdb user " + AdminUser + " does not exist, creating it.")
+			fmt.Println("***DEFAULT USER CREDENTIALS:***")
+			fmt.Println("Username: " + AdminUser)
+			fmt.Println("Password: " + AdminPass)
 
 			return nil
 		}
