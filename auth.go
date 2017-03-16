@@ -85,15 +85,21 @@ func debugln(v ...interface{}) {
 func NewAuthState(path, user string) (*AuthState, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
+		log.Fatalln(err)
 		return nil, err
 	}
 
+	return NewAuthStateWithDB(db, path, user)
+}
+
+// NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState
+func NewAuthStateWithDB(db *bolt.DB, path, user string) (*AuthState, error) {
 	state := new(AuthState)
 	state.boltdb = db
 	// Important to set defaultUser now, before dbInit()
 	state.defaultUser = user
 
-	err = state.dbInit()
+	err := state.dbInit()
 	if err != nil {
 		log.Fatalln(err)
 	}
