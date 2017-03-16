@@ -14,16 +14,11 @@ package auth
 //   - AdminUser specified is made an Admin, so only one admin
 //   - Boltdb powered, using a Users buckets
 //   - Success/failure is delivered via a redirect and a flash message
-//
-//  XSRF:
-//   - Cross-site Request Forgery protection, using the same concept I use for auth functions above
-//   - I personally migrated to gorilla/csrf, as it's go1.7/context compatible and easy to use
+//   -
 
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"html/template"
@@ -40,7 +35,6 @@ import (
 
 type key int
 
-const TokenKey key = 0
 const UserKey key = 1
 const MsgKey key = 2
 
@@ -52,8 +46,9 @@ var UserInfoBucketName = []byte("Users")
 var UserDoesntExist = errors.New("User does not exist")
 
 type AuthState struct {
-	boltdb *bolt.DB
-	cookie *securecookie.SecureCookie
+	defaultUser string
+	boltdb      *bolt.DB
+	cookie      *securecookie.SecureCookie
 }
 
 type authInfo struct {
@@ -70,15 +65,8 @@ type Flash struct {
 	Msg string
 }
 
-type Token string
-
-var (
-	AdminUser = "admin"
-	AdminPass = "admin"
-	Debug     = false
-)
-
-func NewAuthState(path string) (*AuthState, error) {
+// NewAuthState creates a new AuthState, storing the boltDB connection, cookie info, and defaultUsername (which is also the admin user)
+func NewAuthState(path, defaultUser string) (*AuthState, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, err
@@ -94,9 +82,12 @@ func NewAuthState(path string) (*AuthState, error) {
 	hash, block := state.getAuthInfo()
 	state.cookie = securecookie.New(hash, block)
 
+	state.defaultUser = defaultUser
+
 	return state, nil
 }
 
+// Generate a random amount of bytes given the
 func RandBytes(n int) []byte {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
@@ -106,12 +97,6 @@ func RandBytes(n int) []byte {
 		return nil
 	}
 	return b
-}
-
-//RandKey generates a random string of specific length
-func RandKey(n int) string {
-	b := RandBytes(n)
-	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // HashPassword generates a bcrypt hash of the password using work factor 14.
@@ -143,24 +128,16 @@ func fromFlashContext(c context.Context) (*Flash, bool) {
 	return f, ok
 }
 
-func newTokenContext(c context.Context, t string) context.Context {
-	return context.WithValue(c, TokenKey, t)
-}
-
-func fromTokenContext(c context.Context) (string, bool) {
-	t, ok := c.Value(TokenKey).(string)
-	return t, ok
-}
-
 // SetSession Takes a key, and a value to store inside a cookie
-// Currently used for username and CSRF tokens
+// Currently used for user info and related flash messages
 func (state *AuthState) SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
 
 	if encoded, err := state.cookie.Encode(key, val); err == nil {
 		cookie := &http.Cookie{
-			Name:  key,
-			Value: encoded,
-			Path:  "/",
+			Name:     key,
+			Value:    encoded,
+			Path:     "/",
+			HttpOnly: true,
 		}
 		http.SetCookie(w, cookie)
 	}
@@ -206,11 +183,6 @@ func (state *AuthState) getFlashFromCookie(r *http.Request, w http.ResponseWrite
 	return message
 }
 
-// Retrieve a token
-func (state *AuthState) getTokenFromCookie(r *http.Request, w http.ResponseWriter) (token string) {
-	return state.ReadSession("token", w, r)
-}
-
 // GetUsername retrieves username, and admin bool from context
 func GetUsername(c context.Context) (username string, isAdmin bool) {
 	//defer timeTrack(time.Now(), "GetUsername")
@@ -254,48 +226,6 @@ func GetFlash(c context.Context) string {
 		flash = t.Msg
 	}
 	return flash
-}
-
-// GetToken retrieves token from context
-func GetToken(c context.Context) string {
-	//defer timeTrack(time.Now(), "GetUsername")
-	t, ok := fromTokenContext(c)
-	if !ok {
-		t = ""
-	}
-	return t
-}
-
-func (state *AuthState) genToken(w http.ResponseWriter, r *http.Request) string {
-	token := RandKey(32)
-	state.SetSession("token", token, w, r)
-	return token
-}
-
-// Only set a new token if one doesn't already exist
-func (state *AuthState) setToken(w http.ResponseWriter, r *http.Request) (context.Context, string) {
-	token := state.ReadSession("token", w, r)
-	if token == "" {
-		token := RandKey(32)
-		state.SetSession("token", token, w, r)
-	}
-	return newTokenContext(r.Context(), token), token
-}
-
-// CheckToken if given an http.Request with a token input, compare it to the token in the session cookie
-func (state *AuthState) CheckToken(w http.ResponseWriter, r *http.Request) error {
-	flashToken := GetToken(r.Context())
-	tmplToken := r.FormValue("token")
-	if tmplToken == "" {
-		return fmt.Errorf("CSRF Blank! flashToken: %s tmplToken: %s", flashToken, tmplToken)
-	}
-	if !verifyToken(tmplToken, flashToken) {
-		return fmt.Errorf("CSRF Mismatch! flashToken: %s tmplToken: %s", flashToken, tmplToken)
-	}
-	// Generate a new CSRF token after this one has been used
-	newToken := RandKey(32)
-	state.SetSession("token", newToken, w, r)
-	return nil
 }
 
 //UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
@@ -391,6 +321,7 @@ func (state *AuthState) SignupPostHandler(w http.ResponseWriter, r *http.Request
 		err := state.newUser(username, password)
 		if err != nil {
 			state.SetSession("flash", "User registration failed.", w, r)
+			log.Println("Error registering user", err)
 			postRedir(w, r, "/signup")
 			return
 		}
@@ -453,7 +384,7 @@ func (state *AuthState) LoginPostHandler(w http.ResponseWriter, r *http.Request)
 		}
 
 		// Login authentication
-		if state.auth(username, password) {
+		if state.boltAuth(username, password) {
 			state.SetSession("user", username, w, r)
 			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
 			postRedir(w, r, r2)
@@ -471,34 +402,6 @@ func (state *AuthState) LoginPostHandler(w http.ResponseWriter, r *http.Request)
 		// Give an error message.
 	}
 
-}
-
-/*
-func ldapAuth(un, pw string) bool {
-	//Build DN: uid=admin,ou=People,dc=example,dc=com
-	dn := Authcfg.LdapUn + "=" + un + ",ou=" + Authcfg.LdapConf.LdapOu + "," + Authcfg.LdapConf.LdapDn
-	l := ldap.NewLDAPConnection(Authcfg.LdapConf.LdapUrl, Authcfg.LdapConf.LdapPort)
-	err := l.Connect()
-	if err != nil {
-		utils.Debugln(dn)
-		fmt.Printf("LDAP connection error: %v", err)
-		return false
-	}
-	defer l.Close()
-	err = l.Bind(dn, pw)
-	if err != nil {
-		utils.Debugln(dn)
-		fmt.Printf("error: %v", err)
-		return false
-	}
-	utils.Debugln("Authenticated via LDAP")
-	return true
-}
-*/
-
-// Bundle of all auth functions, checking which are enabled
-func (state *AuthState) auth(username, password string) bool {
-	return state.boltAuth(username, password)
 }
 
 func (state *AuthState) boltAuth(username, password string) bool {
@@ -536,7 +439,7 @@ func (state *AuthState) boltAuth(username, password string) bool {
 // Check if user actually exists
 func (state *AuthState) doesUserExist(username string) bool {
 	err := state.boltdb.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(UserInfoBucketName))
+		b := tx.Bucket(UserInfoBucketName)
 		v := b.Get([]byte(username))
 		if v == nil {
 			err := UserDoesntExist
@@ -574,11 +477,6 @@ func (state *AuthState) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 // Redirect back to given page after successful login or signup.
 func postRedir(w http.ResponseWriter, r *http.Request, name string) {
 	http.Redirect(w, r, name, http.StatusSeeOther)
-}
-
-// Taken from nosurf: https://github.com/justinas/nosurf/blob/master/token.go
-func verifyToken(realToken, sentToken string) bool {
-	return subtle.ConstantTimeCompare([]byte(realToken), []byte(sentToken)) == 1
 }
 
 // Dedicated function to create new users, taking plaintext username, password, and role
@@ -750,9 +648,9 @@ func (state *AuthState) UserEnvMiddle(next http.Handler) http.Handler {
 			state.ClearSession("user", w, r)
 		}
 
-		// If username is the configured AdminUser, set context to reflect this
+		// If username is the configured defaultUser, set context to reflect this
 		isAdmin := false
-		if username == AdminUser {
+		if username == state.defaultUser {
 			isAdmin = true
 		}
 		u := &User{
@@ -819,42 +717,28 @@ func (state *AuthState) dbInit() error {
 			}
 		}
 
-		userbucketUser := userbucket.Get([]byte(AdminUser))
+		userbucketUser := userbucket.Get([]byte(state.defaultUser))
 		if userbucketUser == nil {
 
 			//hash, err := passlib.Hash("admin")
-			hash, err := HashPassword([]byte(AdminPass))
+			hash, err := HashPassword([]byte("admin"))
 			if err != nil {
 				// couldn't hash password for some reason
 				log.Fatalln(err)
 				return err
 			}
-			err = userbucket.Put([]byte(AdminUser), []byte(hash))
+			err = userbucket.Put([]byte(state.defaultUser), []byte(hash))
 			if err != nil {
 				log.Println(err)
 				return err
 			}
-			log.Println("Admin Boltdb user " + AdminUser + " does not exist, creating it.")
+			log.Println("Admin Boltdb user " + state.defaultUser + " does not exist, creating it.")
 			fmt.Println("***DEFAULT USER CREDENTIALS:***")
-			fmt.Println("Username: " + AdminUser)
-			fmt.Println("Password: " + AdminPass)
+			fmt.Println("Username: " + state.defaultUser)
+			fmt.Println("Password: admin")
 
 			return nil
 		}
 		return nil
 	})
 }
-
-/*
-func Csrf(next http.HandlerFunc) http.HandlerFunc {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-        r.ParseForm()
-		flashToken := GetToken(r)
-		tmplToken := r.FormValue("token")
-        log.Println("flashToken: "+flashToken)
-        log.Println("tmplToken: "+tmplToken)
-		next.ServeHTTP(w, r)
-	}
-	return http.HandlerFunc(handler)
-}
-*/
