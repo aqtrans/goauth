@@ -17,6 +17,7 @@ package auth
 //   -
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -45,6 +47,10 @@ var UserInfoBucketName = []byte("Users")
 
 var UserDoesntExist = errors.New("User does not exist")
 
+// Debug variable can be set to true to have debugging info logged, otherwise silent
+var Debug = false
+
+// AuthState holds all required info to get authentication working in the app
 type AuthState struct {
 	defaultUser string
 	boltdb      *bolt.DB
@@ -65,8 +71,18 @@ type Flash struct {
 	Msg string
 }
 
+// If Debug is set to true, this logs to Stderr
+func debugln(v ...interface{}) {
+	if Debug {
+		var buf bytes.Buffer
+		debuglogger := log.New(&buf, "Debug: ", log.Ltime)
+		debuglogger.SetOutput(os.Stderr)
+		debuglogger.Print(v)
+	}
+}
+
 // NewAuthState creates a new AuthState, storing the boltDB connection, cookie info, and defaultUsername (which is also the admin user)
-func NewAuthState(path, defaultUser string) (*AuthState, error) {
+func NewAuthState(path, user string) (*AuthState, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, err
@@ -74,15 +90,16 @@ func NewAuthState(path, defaultUser string) (*AuthState, error) {
 
 	state := new(AuthState)
 	state.boltdb = db
+	// Important to set defaultUser now, before dbInit()
+	state.defaultUser = user
+
 	err = state.dbInit()
 	if err != nil {
-		log.Println(err)
+		log.Fatalln(err)
 	}
 
 	hash, block := state.getAuthInfo()
 	state.cookie = securecookie.New(hash, block)
-
-	state.defaultUser = defaultUser
 
 	return state, nil
 }
@@ -148,7 +165,7 @@ func (state *AuthState) ReadSession(key string, w http.ResponseWriter, r *http.R
 	if cookie, err := r.Cookie(key); err == nil {
 		err := state.cookie.Decode(key, cookie.Value, &value)
 		if err != nil {
-			log.Println("Error decoding cookie " + key + " value")
+			debugln("Error decoding cookie " + key + " value")
 			state.SetSession(key, "", w, r)
 		}
 	}
@@ -209,7 +226,7 @@ func (state *AuthState) IsLoggedIn(c context.Context) bool {
 		}
 	}
 	if !ok {
-		log.Println("Error IsLoggedIn not OK")
+		debugln("Error IsLoggedIn not OK")
 	}
 	return false
 }
@@ -429,7 +446,7 @@ func (state *AuthState) boltAuth(username, password string) bool {
 	err := CheckPasswordHash(hashedUserPassByte, []byte(password))
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
-		log.Println("error verifying password for user " + username)
+		debugln("error verifying password for user " + username)
 		return false
 	}
 	// TODO: Should look into fleshing this out
@@ -693,7 +710,7 @@ func (state *AuthState) dbInit() error {
 
 		hashKey := infobucket.Get(HashKeyName)
 		if hashKey == nil {
-			log.Println("Throwing hashkey into auth.db.")
+			debugln("Throwing hashkey into auth.db.")
 			// Generate a random hashKey
 			hashKey := RandBytes(64)
 
@@ -706,7 +723,7 @@ func (state *AuthState) dbInit() error {
 
 		blockKey := infobucket.Get(BlockKeyName)
 		if blockKey == nil {
-			log.Println("Throwing blockkey into auth.db.")
+			debugln("Throwing blockkey into auth.db.")
 			// Generate a random blockKey
 			blockKey := RandBytes(32)
 
@@ -732,10 +749,10 @@ func (state *AuthState) dbInit() error {
 				log.Println(err)
 				return err
 			}
-			log.Println("Admin Boltdb user " + state.defaultUser + " does not exist, creating it.")
-			fmt.Println("***DEFAULT USER CREDENTIALS:***")
-			fmt.Println("Username: " + state.defaultUser)
-			fmt.Println("Password: admin")
+			debugln("Admin Boltdb user " + state.defaultUser + " does not exist, creating it.")
+			debugln("***DEFAULT USER CREDENTIALS:***")
+			debugln("Username: " + state.defaultUser)
+			debugln("Password: admin")
 
 			return nil
 		}
