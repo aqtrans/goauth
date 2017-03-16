@@ -53,8 +53,13 @@ var Debug = false
 // AuthState holds all required info to get authentication working in the app
 type AuthState struct {
 	defaultUser string
-	boltdb      *bolt.DB
+	boltdb      *DB
 	cookie      *securecookie.SecureCookie
+}
+
+// DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
+type DB struct {
+	*bolt.DB
 }
 
 type authInfo struct {
@@ -89,11 +94,11 @@ func NewAuthState(path, user string) (*AuthState, error) {
 		return nil, err
 	}
 
-	return NewAuthStateWithDB(db, path, user)
+	return NewAuthStateWithDB(&DB{db}, path, user)
 }
 
 // NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState
-func NewAuthStateWithDB(db *bolt.DB, path, user string) (*AuthState, error) {
+func NewAuthStateWithDB(db *DB, path, user string) (*AuthState, error) {
 	state := new(AuthState)
 	state.boltdb = db
 	// Important to set defaultUser now, before dbInit()
