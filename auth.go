@@ -242,6 +242,20 @@ func (state *AuthState) IsLoggedIn(c context.Context) bool {
 	return false
 }
 
+func (state *AuthState) GetUserState(c context.Context) (user *User) {
+	userC, ok := fromUserContext(c)
+	if ok {
+		// If username is in a context, and that user exists, return that User info
+		if userC.Username != "" && state.doesUserExist(userC.Username) {
+			user = userC
+		}
+	}
+	if !ok {
+		debugln("No UserState in context.")
+	}
+	return user
+}
+
 // GetFlash retrieves token from context
 func GetFlash(c context.Context) string {
 	//defer timeTrack(time.Now(), "GetUsername")
@@ -624,6 +638,22 @@ func (state *AuthState) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//username := getUsernameFromCookie(r)
 		//username, _ := GetUsername(r.Context())
 		//if username == "" {
+		if !state.IsLoggedIn(r.Context()) {
+			rurl := r.URL.String()
+			// Detect if we're in an endless loop, if so, just panic
+			if strings.HasPrefix(rurl, "login?url=/login") {
+				panic("AuthMiddle is in an endless redirect loop")
+				return
+			}
+			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (state *AuthState) AuthMiddleHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !state.IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
