@@ -58,17 +58,17 @@ func TestBolt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = authState.newUser("adminTest", "test")
+	err = authState.NewUser("adminTest", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !authState.doesUserExist("adminTest") {
 		t.Fatal("ERR: adminTest user does not exist in authState!")
 	}
-	if !authState.boltAuth("adminTest", "test") {
+	if !authState.BoltAuth("adminTest", "test") {
 		t.Fatal("ERR: cannot login for some reason!")
 	}
-	err = authState.deleteUser("adminTest")
+	err = authState.DeleteUser("adminTest")
 	if err != nil {
 		t.Fatal(err)
 	}

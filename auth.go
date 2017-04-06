@@ -22,10 +22,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -228,11 +226,11 @@ func GetUsername(c context.Context) (username string, isAdmin bool) {
 
 // IsLoggedIn takes a context, tries to fetch user{} from it,
 //  and if that succeeds, verifies the username fetched actually exists
-func (state *AuthState) IsLoggedIn(c context.Context) bool {
+func IsLoggedIn(c context.Context) bool {
 	userC, ok := fromUserContext(c)
 	if ok {
 		// If username is in a context, and that user exists, return true
-		if userC.Username != "" && state.doesUserExist(userC.Username) {
+		if userC.Username != "" {
 			return true
 		}
 	}
@@ -242,11 +240,11 @@ func (state *AuthState) IsLoggedIn(c context.Context) bool {
 	return false
 }
 
-func (state *AuthState) GetUserState(c context.Context) (user *User) {
+func GetUserState(c context.Context) (user *User) {
 	userC, ok := fromUserContext(c)
 	if ok {
 		// If username is in a context, and that user exists, return that User info
-		if userC.Username != "" && state.doesUserExist(userC.Username) {
+		if userC.Username != "" {
 			user = userC
 		}
 	}
@@ -270,183 +268,7 @@ func GetFlash(c context.Context) string {
 	return flash
 }
 
-//UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *AuthState) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := state.newUser(username, password)
-		if err != nil {
-			panic(err)
-		}
-
-		state.SetSession("flash", "Successfully added '"+username+"' user.", w, r)
-		postRedir(w, r, r.Referer())
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//AdminUserPassChangePostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *AuthState) AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
-		// Hash password now so if it fails we catch it before touching Bolt
-		//hash, err := passlib.Hash(password)
-		hash, err := HashPassword([]byte(password))
-		if err != nil {
-			// couldn't hash password for some reason
-			log.Fatalln(err)
-			return
-		}
-
-		err = state.updatePass(username, hash)
-		if err != nil {
-			panic(err)
-		}
-		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
-		postRedir(w, r, r.Referer())
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//AdminUserDeletePostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *AuthState) AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-
-		err := state.deleteUser(username)
-		if err != nil {
-			panic(err)
-		}
-		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
-		postRedir(w, r, r.Referer())
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//SignupPostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *AuthState) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := state.newUser(username, password)
-		if err != nil {
-			state.SetSession("flash", "User registration failed.", w, r)
-			log.Println("Error registering user", err)
-			postRedir(w, r, "/signup")
-			return
-		}
-		state.SetSession("flash", "Successful user registration.", w, r)
-		postRedir(w, r, "/login")
-		return
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
-// Comparing values with LDAP or configured username/password combos
-func (state *AuthState) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
-
-	switch r.Method {
-	case "GET":
-		// This should be handled in a separate function inside your app
-		/*
-			// Serve login page, replacing loginPageHandler
-			defer timeTrack(time.Now(), "loginPageHandler")
-			title := "login"
-			user := GetUsername(r)
-			//p, err := loadPage(title, r)
-			data := struct {
-				UN  string
-				Title string
-			}{
-				user,
-				title,
-			}
-			err := renderTemplate(w, "login.tmpl", data)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-		*/
-	case "POST":
-
-		// Handle login POST request
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
-		referer, _ := url.Parse(r.Referer())
-
-		// Check if we have a ?url= query string, from AuthMiddle
-		// Otherwise, just use the referrer
-		var r2 string
-		r2 = referer.Query().Get("url")
-		if r2 == "" {
-			r2 = r.Referer()
-			// if r.Referer is blank, just redirect to index
-			if r.Referer() == "" || referer.RequestURI() == "/login" {
-				r2 = "/"
-			}
-		}
-
-		// Login authentication
-		if state.boltAuth(username, password) {
-			state.SetSession("user", username, w, r)
-			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
-			postRedir(w, r, r2)
-			return
-		}
-		state.SetSession("flash", "User '"+username+"' failed to login. <br> Please check your credentials and try again.", w, r)
-		postRedir(w, r, "/login")
-		return
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-
-}
-
-func (state *AuthState) boltAuth(username, password string) bool {
+func (state *AuthState) BoltAuth(username, password string) bool {
 
 	// Catch non-existent users before wasting CPU cycles checking hashes
 	if !state.doesUserExist(username) {
@@ -523,7 +345,7 @@ func postRedir(w http.ResponseWriter, r *http.Request, name string) {
 
 // Dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
-func (state *AuthState) newUser(username, password string) error {
+func (state *AuthState) NewUser(username, password string) error {
 
 	// Hash password now so if it fails we catch it before touching Bolt
 	//hash, err := passlib.Hash(password)
@@ -598,7 +420,7 @@ func (state *AuthState) Userlist() ([]string, error) {
 	return userList, err
 }
 
-func (state *AuthState) deleteUser(username string) error {
+func (state *AuthState) DeleteUser(username string) error {
 	err := state.boltdb.Update(func(tx *bolt.Tx) error {
 		log.Println(username + " has been deleted")
 		return tx.Bucket(UserInfoBucketName).Delete([]byte(username))
@@ -610,7 +432,7 @@ func (state *AuthState) deleteUser(username string) error {
 	return err
 }
 
-func (state *AuthState) updatePass(username string, hash []byte) error {
+func (state *AuthState) UpdatePass(username string, hash []byte) error {
 
 	// Update password only if user exists
 	state.boltdb.Update(func(tx *bolt.Tx) error {
@@ -638,7 +460,7 @@ func (state *AuthState) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//username := getUsernameFromCookie(r)
 		//username, _ := GetUsername(r.Context())
 		//if username == "" {
-		if !state.IsLoggedIn(r.Context()) {
+		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -654,7 +476,7 @@ func (state *AuthState) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 
 func (state *AuthState) AuthMiddleHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !state.IsLoggedIn(r.Context()) {
+		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -672,7 +494,7 @@ func (state *AuthState) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, isAdmin := GetUsername(r.Context())
 		//if username == "" {
-		if !state.IsLoggedIn(r.Context()) {
+		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
 			// Detect if we're in an endless loop, if so, just panic
 			if strings.HasPrefix(rurl, "login?url=/login") {
@@ -702,6 +524,8 @@ func (state *AuthState) UserEnvMiddle(next http.Handler) http.Handler {
 		// Check if user actually exists before setting username
 		// If user does not exist, clear the session because something fishy is going on
 		if !state.doesUserExist(username) {
+			log.Println("auth.UserEnvMiddle ERROR: Somehow a non-existent user was found in a cookie!")
+			log.Println(username)
 			username = ""
 			state.ClearSession("user", w, r)
 		}
