@@ -521,29 +521,38 @@ func (state *AuthState) UserEnvMiddle(next http.Handler) http.Handler {
 		username := state.getUsernameFromCookie(r, w)
 		message := state.getFlashFromCookie(r, w)
 
-		// Check if user actually exists before setting username
-		// If user does not exist, clear the session because something fishy is going on
-		if !state.doesUserExist(username) {
-			log.Println("auth.UserEnvMiddle ERROR: Somehow a non-existent user was found in a cookie!")
-			log.Println(username)
-			username = ""
-			state.ClearSession("user", w, r)
+		newc := r.Context()
+
+		if username != "" {
+			// Check if user actually exists before setting username
+			// If user does not exist, clear the session because something fishy is going on
+			if !state.doesUserExist(username) {
+				log.Println("auth.UserEnvMiddle ERROR: Somehow a non-existent user was found in a cookie!")
+				log.Println(username)
+				username = ""
+				state.ClearSession("user", w, r)
+			}
+
+			// If username is the configured defaultUser, set context to reflect this
+			isAdmin := false
+			if username == state.defaultUser {
+				isAdmin = true
+			}
+			u := &User{
+				Username: username,
+				IsAdmin:  isAdmin,
+			}
+
+			newc = newUserContext(r.Context(), u)
 		}
 
-		// If username is the configured defaultUser, set context to reflect this
-		isAdmin := false
-		if username == state.defaultUser {
-			isAdmin = true
+		if message != "" {
+			f := &Flash{
+				Msg: message,
+			}
+			newc = newFlashContext(newc, f)
 		}
-		u := &User{
-			Username: username,
-			IsAdmin:  isAdmin,
-		}
-		f := &Flash{
-			Msg: message,
-		}
-		newc := newUserContext(r.Context(), u)
-		newc = newFlashContext(newc, f)
+
 		next.ServeHTTP(w, r.WithContext(newc))
 	})
 }
