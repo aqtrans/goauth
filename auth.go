@@ -84,6 +84,15 @@ func debugln(v ...interface{}) {
 	}
 }
 
+// MustOpenAuthDB returns a new, open DB at a specified location.
+func MustOpenAuthDB(path string) *DB {
+	db, err := bolt.Open(path, 0666, nil)
+	if err != nil {
+		panic(err)
+	}
+	return &DB{db}
+}
+
 // NewAuthState creates a new AuthState, storing the boltDB connection, cookie info, and defaultUsername (which is also the admin user)
 func NewAuthState(path, user string) (*AuthState, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
