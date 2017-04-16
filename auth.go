@@ -552,7 +552,7 @@ func (state *AuthState) UserEnvMiddle(next http.Handler) http.Handler {
 				IsAdmin:  isAdmin,
 			}
 
-			newc = newUserContext(r.Context(), u)
+			newc = newUserContext(newc, u)
 		}
 
 		if message != "" {
