@@ -16,6 +16,15 @@ package auth
 //   - Success/failure is delivered via a redirect and a flash message
 //   -
 
+/* Example for using AuthState in an app:
+In main()
+       // Bring up authState
+       var err error
+       authState, err = auth.NewAuthState("./data/auth.db", "admin_username")
+       check(err)
+Use authstate methods and handlers
+*/
+
 import (
 	"bytes"
 	"context"
