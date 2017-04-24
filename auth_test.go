@@ -1,14 +1,13 @@
 package auth
 
 import (
-	"github.com/boltdb/bolt"
 	"io/ioutil"
 	"os"
 	"testing"
 )
 
-type AuthDB struct {
-	*DB
+func init() {
+	Debug = true
 }
 
 // tempfile returns a temporary file path.
@@ -26,38 +25,29 @@ func tempfile() string {
 	return f.Name()
 }
 
-// MustOpenDB returns a new, open DB at a temporary location.
-func mustOpenDB() *AuthDB {
-	tmpdb, err := bolt.Open(tempfile(), 0666, nil)
-	if err != nil {
-		panic(err)
-	}
-	return &AuthDB{&DB{tmpdb}}
-}
-
-func (tmpdb *AuthDB) Close() error {
-	//log.Println(tmpdb.Path())
-	defer os.Remove(tmpdb.Path())
-	return tmpdb.DB.Close()
-}
-
-func (tmpdb *AuthDB) MustClose() {
-	if err := tmpdb.Close(); err != nil {
-		panic(err)
-	}
-}
-
 func TestBolt(t *testing.T) {
-	authDB := mustOpenDB()
-	authState, err := NewAuthStateWithDB(authDB.DB, tempfile(), "admin")
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb, "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer authDB.Close()
+	/*
+		var db *bolt.DB
+		db, err = authState.getDB()
+		if err != nil {
+			log.Println(err)
+		}
+		authState.BoltDB.authdb = db
+		authState.BoltDB.path = tmpdb
+		defer authState.releaseDB()
+	*/
+	defer os.Remove(tmpdb)
+
 	_, err = authState.Userlist()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	err = authState.NewUser("adminTest", "test")
 	if err != nil {
 		t.Fatal(err)

@@ -60,13 +60,14 @@ var Debug = false
 // AuthState holds all required info to get authentication working in the app
 type AuthState struct {
 	defaultUser string
-	boltdb      *DB
+	BoltDB      *DB
 	cookie      *securecookie.SecureCookie
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
 type DB struct {
-	*bolt.DB
+	authdb *bolt.DB
+	path   string
 }
 
 type authInfo struct {
@@ -99,24 +100,44 @@ func MustOpenAuthDB(path string) *DB {
 	if err != nil {
 		panic(err)
 	}
-	return &DB{db}
+	return &DB{authdb: db, path: path}
 }
 
-// NewAuthState creates a new AuthState, storing the boltDB connection, cookie info, and defaultUsername (which is also the admin user)
-func NewAuthState(path, user string) (*AuthState, error) {
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+func (state *AuthState) getDB() (*bolt.DB, error) {
+	var db *bolt.DB
+	log.Println(state.BoltDB.path)
+	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
+	state.BoltDB.authdb = db
+	return state.BoltDB.authdb, nil
+}
 
-	return NewAuthStateWithDB(&DB{db}, path, user)
+func (state *AuthState) releaseDB() {
+	state.BoltDB.authdb.Close()
+}
+
+// NewAuthState creates a new AuthState, storing the boltDB connection, cookie info, and defaultUsername (which is also the admin user)
+func NewAuthState(path, user string) (*AuthState, error) {
+	/*
+		db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+		if err != nil {
+			log.Fatalln(err)
+			return nil, err
+		}
+	*/
+	var db *bolt.DB
+
+	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path, user)
 }
 
 // NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState
 func NewAuthStateWithDB(db *DB, path, user string) (*AuthState, error) {
 	state := new(AuthState)
-	state.boltdb = db
+	state.BoltDB = db
+	state.BoltDB.path = path
 	// Important to set defaultUser now, before dbInit()
 	state.defaultUser = user
 
@@ -294,9 +315,16 @@ func (state *AuthState) BoltAuth(username, password string) bool {
 		return false
 	}
 
-	var hashedUserPassByte []byte
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
+
 	// Grab given user's password from Bolt
-	state.boltdb.View(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(UserInfoBucketName)
 		v := b.Get([]byte(username))
 		if v == nil {
@@ -304,14 +332,18 @@ func (state *AuthState) BoltAuth(username, password string) bool {
 			//log.Println(err)
 			return err
 		}
-		hashedUserPassByte = v
+		err = CheckPasswordHash(v, []byte(password))
+		if err != nil {
+			// Incorrect password, malformed hash, etc.
+			debugln("error verifying password for user " + username)
+			return err
+		}
 		return nil
 	})
 
-	err := CheckPasswordHash(hashedUserPassByte, []byte(password))
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
-		debugln("error verifying password for user " + username)
+		//debugln("error verifying password for user " + username)
 		return false
 	}
 	// TODO: Should look into fleshing this out
@@ -320,7 +352,15 @@ func (state *AuthState) BoltAuth(username, password string) bool {
 
 // Check if user actually exists
 func (state *AuthState) doesUserExist(username string) bool {
-	err := state.boltdb.View(func(tx *bolt.Tx) error {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
+
+	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(UserInfoBucketName)
 		v := b.Get([]byte(username))
 		if v == nil {
@@ -339,10 +379,22 @@ func (state *AuthState) doesUserExist(username string) bool {
 }
 
 func (state *AuthState) getAuthInfo() (hashkey, blockkey []byte) {
-	err := state.boltdb.View(func(tx *bolt.Tx) error {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
+
+	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(AuthInfoBucketName)
-		hashkey = b.Get(HashKeyName)
-		blockkey = b.Get(BlockKeyName)
+		v1 := b.Get(HashKeyName)
+		v2 := b.Get(BlockKeyName)
+		hashkey = make([]byte, len(v1))
+		blockkey = make([]byte, len(v2))
+		copy(hashkey, v1)
+		copy(blockkey, v2)
 		return nil
 	})
 	if err != nil {
@@ -364,6 +416,13 @@ func postRedir(w http.ResponseWriter, r *http.Request, name string) {
 // Dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
 func (state *AuthState) NewUser(username, password string) error {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
 
 	// Hash password now so if it fails we catch it before touching Bolt
 	//hash, err := passlib.Hash(password)
@@ -375,7 +434,7 @@ func (state *AuthState) NewUser(username, password string) error {
 	}
 
 	// If no existing user, store username and hash
-	viewerr := state.boltdb.View(func(tx *bolt.Tx) error {
+	viewerr := db.View(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket(UserInfoBucketName)
 
 		userbucketUser := userbucket.Get([]byte(username))
@@ -393,7 +452,7 @@ func (state *AuthState) NewUser(username, password string) error {
 	}
 
 	//var vb []byte
-	adderr := state.boltdb.Update(func(tx *bolt.Tx) error {
+	adderr := db.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte("Users"))
 
 		userbucketUser := userbucket.Get([]byte(username))
@@ -422,8 +481,16 @@ func (state *AuthState) NewUser(username, password string) error {
 }
 
 func (state *AuthState) Userlist() ([]string, error) {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
+
 	userList := []string{}
-	err := state.boltdb.View(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket(UserInfoBucketName)
 		err := userbucket.ForEach(func(key, value []byte) error {
 			//fmt.Printf("A %s is %s.\n", key, value)
@@ -439,7 +506,15 @@ func (state *AuthState) Userlist() ([]string, error) {
 }
 
 func (state *AuthState) DeleteUser(username string) error {
-	err := state.boltdb.Update(func(tx *bolt.Tx) error {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
+
+	err = db.Update(func(tx *bolt.Tx) error {
 		log.Println(username + " has been deleted")
 		return tx.Bucket(UserInfoBucketName).Delete([]byte(username))
 	})
@@ -451,9 +526,16 @@ func (state *AuthState) DeleteUser(username string) error {
 }
 
 func (state *AuthState) UpdatePass(username string, hash []byte) error {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
 
 	// Update password only if user exists
-	state.boltdb.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket(UserInfoBucketName)
 		userbucketUser := userbucket.Get([]byte(username))
 
@@ -470,7 +552,7 @@ func (state *AuthState) UpdatePass(username string, hash []byte) error {
 		log.Println("User " + username + " has changed their password.")
 		return nil
 	})
-	return nil
+	return err
 }
 
 func (state *AuthState) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
@@ -588,8 +670,15 @@ func (state *AuthState) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc
 }
 
 func (state *AuthState) dbInit() error {
+	var db *bolt.DB
+	var err error
+	db, err = state.getDB()
+	if err != nil {
+		log.Println(err)
+	}
+	defer state.releaseDB()
 
-	return state.boltdb.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		userbucket, err := tx.CreateBucketIfNotExists(UserInfoBucketName)
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
@@ -650,4 +739,5 @@ func (state *AuthState) dbInit() error {
 		}
 		return nil
 	})
+	return err
 }
