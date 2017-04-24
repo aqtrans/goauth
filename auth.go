@@ -105,7 +105,7 @@ func MustOpenAuthDB(path string) *DB {
 
 func (state *AuthState) getDB() (*bolt.DB, error) {
 	var db *bolt.DB
-	log.Println(state.BoltDB.path)
+	//log.Println(state.BoltDB.path)
 	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		log.Fatalln(err)
