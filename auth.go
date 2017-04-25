@@ -33,8 +33,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -740,4 +742,149 @@ func (state *AuthState) dbInit() error {
 		return nil
 	})
 	return err
+}
+
+//UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
+// Signing up users as necessary, inside the AuthConf
+func (state *AuthState) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+	case "POST":
+		username := template.HTMLEscapeString(r.FormValue("username"))
+		password := template.HTMLEscapeString(r.FormValue("password"))
+		err := state.NewUser(username, password)
+		if err != nil {
+			panic(err)
+		}
+		state.SetSession("flash", "Successfully added '"+username+"' user.", w, r)
+		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+		return
+	case "PUT":
+		// Update an existing record.
+	case "DELETE":
+		// Remove the record.
+	default:
+		// Give an error message.
+	}
+}
+
+//AdminUserPassChangePostHandler only handles POST requests, using forms named "username" and "password"
+// Signing up users as necessary, inside the AuthConf
+func (state *AuthState) AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+	case "POST":
+		username := template.HTMLEscapeString(r.FormValue("username"))
+		password := template.HTMLEscapeString(r.FormValue("password"))
+		// Hash password now so if it fails we catch it before touching Bolt
+		//hash, err := passlib.Hash(password)
+		hash, err := HashPassword([]byte(password))
+		if err != nil {
+			// couldn't hash password for some reason
+			panic(err)
+		}
+		err = state.UpdatePass(username, hash)
+		if err != nil {
+			panic(err)
+		}
+		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
+		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+		return
+	case "PUT":
+		// Update an existing record.
+	case "DELETE":
+		// Remove the record.
+	default:
+		// Give an error message.
+	}
+}
+
+//AdminUserDeletePostHandler only handles POST requests, using forms named "username" and "password"
+// Signing up users as necessary, inside the AuthConf
+func (state *AuthState) AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+	case "POST":
+		username := template.HTMLEscapeString(r.FormValue("username"))
+		err := state.DeleteUser(username)
+		if err != nil {
+			panic(err)
+		}
+		state.SetSession("flash", "Successfully deleted '"+username+"'.", w, r)
+		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+		return
+	case "PUT":
+		// Update an existing record.
+	case "DELETE":
+		// Remove the record.
+	default:
+		// Give an error message.
+	}
+}
+
+//SignupPostHandler only handles POST requests, using forms named "username" and "password"
+// Signing up users as necessary, inside the AuthConf
+func (state *AuthState) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+	case "POST":
+		username := template.HTMLEscapeString(r.FormValue("username"))
+		password := template.HTMLEscapeString(r.FormValue("password"))
+		err := state.NewUser(username, password)
+		if err != nil {
+			state.SetSession("flash", "User registration failed.", w, r)
+			log.Println("Error registering user", err)
+			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+			return
+		}
+		state.SetSession("flash", "Successful user registration.", w, r)
+		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+		return
+	case "PUT":
+		// Update an existing record.
+	case "DELETE":
+		// Remove the record.
+	default:
+		// Give an error message.
+	}
+}
+
+//LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
+// Comparing values with LDAP or configured username/password combos
+func (state *AuthState) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+	case "POST":
+		// Handle login POST request
+		username := template.HTMLEscapeString(r.FormValue("username"))
+		password := template.HTMLEscapeString(r.FormValue("password"))
+		referer, _ := url.Parse(r.Referer())
+		// Check if we have a ?url= query string, from AuthMiddle
+		// Otherwise, just use the referrer
+		var r2 string
+		r2 = referer.Query().Get("url")
+		if r2 == "" {
+			r2 = r.Referer()
+			// if r.Referer is blank, just redirect to index
+			if r.Referer() == "" || referer.RequestURI() == "/login" {
+				r2 = "/"
+			}
+		}
+		// Login authentication
+		if state.BoltAuth(username, password) {
+			state.SetSession("user", username, w, r)
+			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
+			http.Redirect(w, r, r2, http.StatusSeeOther)
+			return
+		}
+		state.SetSession("flash", "User '"+username+"' failed to login. Please check your credentials and try again.", w, r)
+		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+		return
+	case "PUT":
+		// Update an existing record.
+	case "DELETE":
+		// Remove the record.
+	default:
+		// Give an error message.
+	}
 }
