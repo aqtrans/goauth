@@ -35,6 +35,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"text/template"
 	"time"
@@ -96,13 +97,14 @@ func debugln(v ...interface{}) {
 	}
 }
 
-// MustOpenAuthDB returns a new, open DB at a specified location.
-func MustOpenAuthDB(path string) *DB {
-	db, err := bolt.Open(path, 0666, nil)
+func check(err error) {
 	if err != nil {
-		panic(err)
+		pc, fn, line, ok := runtime.Caller(1)
+		details := runtime.FuncForPC(pc)
+		if ok && details != nil {
+			log.Printf("[auth.error] in %s[%s:%d] %v", details.Name(), fn, line, err)
+		}
 	}
-	return &DB{authdb: db, path: path}
 }
 
 func (state *AuthState) getDB() (*bolt.DB, error) {
@@ -110,7 +112,7 @@ func (state *AuthState) getDB() (*bolt.DB, error) {
 	//log.Println(state.BoltDB.path)
 	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		log.Fatalln(err)
+		check(err)
 		return nil, err
 	}
 	state.BoltDB.authdb = db
@@ -123,13 +125,6 @@ func (state *AuthState) releaseDB() {
 
 // NewAuthState creates a new AuthState, storing the boltDB connection, cookie info, and defaultUsername (which is also the admin user)
 func NewAuthState(path, user string) (*AuthState, error) {
-	/*
-		db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
-		if err != nil {
-			log.Fatalln(err)
-			return nil, err
-		}
-	*/
 	var db *bolt.DB
 
 	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path, user)
@@ -144,9 +139,7 @@ func NewAuthStateWithDB(db *DB, path, user string) (*AuthState, error) {
 	state.defaultUser = user
 
 	err := state.dbInit()
-	if err != nil {
-		log.Fatalln(err)
-	}
+	check(err)
 
 	hash, block := state.getAuthInfo()
 	state.cookie = securecookie.New(hash, block)
@@ -154,13 +147,13 @@ func NewAuthStateWithDB(db *DB, path, user string) (*AuthState, error) {
 	return state, nil
 }
 
-// Generate a random amount of bytes given the
+// RandBytes generates a random amount of bytes given a specified length
 func RandBytes(n int) []byte {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
 	// Note that err == nil only if we read len(b) bytes.
 	if err != nil {
-		log.Fatalln(err)
+		check(err)
 		return nil
 	}
 	return b
@@ -168,7 +161,7 @@ func RandBytes(n int) []byte {
 
 // HashPassword generates a bcrypt hash of the password using work factor 14.
 func HashPassword(password []byte) ([]byte, error) {
-	return bcrypt.GenerateFromPassword(password, 14)
+	return bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
 }
 
 // CheckPasswordHash securely compares a bcrypt hashed password with its possible
@@ -321,7 +314,7 @@ func (state *AuthState) BoltAuth(username, password string) bool {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return false
 	}
 	defer state.releaseDB()
 
@@ -330,9 +323,7 @@ func (state *AuthState) BoltAuth(username, password string) bool {
 		b := tx.Bucket(UserInfoBucketName)
 		v := b.Get([]byte(username))
 		if v == nil {
-			err := UserDoesntExist
-			//log.Println(err)
-			return err
+			return UserDoesntExist
 		}
 		err = CheckPasswordHash(v, []byte(password))
 		if err != nil {
@@ -358,7 +349,7 @@ func (state *AuthState) doesUserExist(username string) bool {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return false
 	}
 	defer state.releaseDB()
 
@@ -366,8 +357,7 @@ func (state *AuthState) doesUserExist(username string) bool {
 		b := tx.Bucket(UserInfoBucketName)
 		v := b.Get([]byte(username))
 		if v == nil {
-			err := UserDoesntExist
-			return err
+			return UserDoesntExist
 		}
 		return nil
 	})
@@ -375,7 +365,8 @@ func (state *AuthState) doesUserExist(username string) bool {
 		return true
 	}
 	if err != nil && err != UserDoesntExist {
-		log.Println(err)
+		check(err)
+		return false
 	}
 	return false
 }
@@ -385,7 +376,7 @@ func (state *AuthState) getAuthInfo() (hashkey, blockkey []byte) {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return []byte(""), []byte("")
 	}
 	defer state.releaseDB()
 
@@ -400,7 +391,8 @@ func (state *AuthState) getAuthInfo() (hashkey, blockkey []byte) {
 		return nil
 	})
 	if err != nil {
-		panic(err)
+		check(err)
+		return []byte(""), []byte("")
 	}
 	return hashkey, blockkey
 }
@@ -422,7 +414,7 @@ func (state *AuthState) NewUser(username, password string) error {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 	defer state.releaseDB()
 
@@ -431,21 +423,18 @@ func (state *AuthState) NewUser(username, password string) error {
 	hash, err := HashPassword([]byte(password))
 	if err != nil {
 		// couldn't hash password for some reason
-		log.Fatalln(err)
+		check(err)
 		return err
 	}
 
 	// If no existing user, store username and hash
 	viewerr := db.View(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket(UserInfoBucketName)
-
 		userbucketUser := userbucket.Get([]byte(username))
 
 		// userbucketUser should be nil if user doesn't exist
 		if userbucketUser != nil {
-			err := errors.New("User already exists")
-			log.Println(err)
-			return err
+			return errors.New("User already exists")
 		}
 		return nil
 	})
@@ -461,14 +450,11 @@ func (state *AuthState) NewUser(username, password string) error {
 
 		// userbucketUser should be nil if user doesn't exist
 		if userbucketUser != nil {
-			err := errors.New("User already exists")
-			log.Println(err)
-			return err
+			return errors.New("User already exists")
 		}
 
 		err = userbucket.Put([]byte(username), []byte(hash))
 		if err != nil {
-			log.Println(err)
 			return err
 		}
 
@@ -487,7 +473,7 @@ func (state *AuthState) Userlist() ([]string, error) {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return []string{}, err
 	}
 	defer state.releaseDB()
 
@@ -512,7 +498,7 @@ func (state *AuthState) DeleteUser(username string) error {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 	defer state.releaseDB()
 
@@ -521,7 +507,6 @@ func (state *AuthState) DeleteUser(username string) error {
 		return tx.Bucket(UserInfoBucketName).Delete([]byte(username))
 	})
 	if err != nil {
-		log.Println(err)
 		return err
 	}
 	return err
@@ -532,7 +517,7 @@ func (state *AuthState) UpdatePass(username string, hash []byte) error {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 	defer state.releaseDB()
 
@@ -543,9 +528,7 @@ func (state *AuthState) UpdatePass(username string, hash []byte) error {
 
 		// userbucketUser should be nil if user doesn't exist
 		if userbucketUser == nil {
-			err := UserDoesntExist
-			log.Println(err)
-			return err
+			return UserDoesntExist
 		}
 		err := userbucket.Put([]byte(username), hash)
 		if err != nil {
@@ -564,9 +547,10 @@ func (state *AuthState) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//if username == "" {
 		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
-			// Detect if we're in an endless loop, if so, just panic
+			// Detect if we're in an endless loop, if so, just redirect to root
 			if strings.HasPrefix(rurl, "login?url=/login") {
-				panic("AuthMiddle is in an endless redirect loop")
+				log.Println("AUTH ERR AuthMiddle is in an endless redirect loop")
+				http.Redirect(w, r, "http://"+r.Host+"/login", 302)
 				return
 			}
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
@@ -580,9 +564,10 @@ func (state *AuthState) AuthMiddleHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
-			// Detect if we're in an endless loop, if so, just panic
+			// Detect if we're in an endless loop, if so, just redirect to root
 			if strings.HasPrefix(rurl, "login?url=/login") {
-				panic("AuthMiddle is in an endless redirect loop")
+				log.Println("AUTH ERR AuthMiddle is in an endless redirect loop")
+				http.Redirect(w, r, "http://"+r.Host+"/login", 302)
 				return
 			}
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
@@ -598,9 +583,11 @@ func (state *AuthState) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc 
 		//if username == "" {
 		if !IsLoggedIn(r.Context()) {
 			rurl := r.URL.String()
-			// Detect if we're in an endless loop, if so, just panic
+			// Detect if we're in an endless loop, if so, just redirect to root
 			if strings.HasPrefix(rurl, "login?url=/login") {
-				panic("AuthAdminMiddle is in an endless redirect loop")
+				log.Println("AUTH ERR AuthAdminMiddle is in an endless redirect loop")
+				http.Redirect(w, r, "http://"+r.Host+"/login", 302)
+				return
 			}
 			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
 			return
@@ -676,7 +663,7 @@ func (state *AuthState) dbInit() error {
 	var err error
 	db, err = state.getDB()
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 	defer state.releaseDB()
 
@@ -699,7 +686,7 @@ func (state *AuthState) dbInit() error {
 
 			err = infobucket.Put(HashKeyName, hashKey)
 			if err != nil {
-				log.Println(err)
+				check(err)
 				return err
 			}
 		}
@@ -712,7 +699,7 @@ func (state *AuthState) dbInit() error {
 
 			err = infobucket.Put(BlockKeyName, blockKey)
 			if err != nil {
-				log.Println(err)
+				check(err)
 				return err
 			}
 		}
@@ -724,12 +711,12 @@ func (state *AuthState) dbInit() error {
 			hash, err := HashPassword([]byte("admin"))
 			if err != nil {
 				// couldn't hash password for some reason
-				log.Fatalln(err)
+				check(err)
 				return err
 			}
 			err = userbucket.Put([]byte(state.defaultUser), []byte(hash))
 			if err != nil {
-				log.Println(err)
+				check(err)
 				return err
 			}
 			debugln("Admin Boltdb user " + state.defaultUser + " does not exist, creating it.")
@@ -754,7 +741,9 @@ func (state *AuthState) UserSignupPostHandler(w http.ResponseWriter, r *http.Req
 		password := template.HTMLEscapeString(r.FormValue("password"))
 		err := state.NewUser(username, password)
 		if err != nil {
-			panic(err)
+			check(err)
+			state.SetSession("flash", "Error adding user. Check logs.", w, r)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 		state.SetSession("flash", "Successfully added '"+username+"' user.", w, r)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
@@ -781,11 +770,15 @@ func (state *AuthState) AdminUserPassChangePostHandler(w http.ResponseWriter, r 
 		hash, err := HashPassword([]byte(password))
 		if err != nil {
 			// couldn't hash password for some reason
-			panic(err)
+			check(err)
+			state.SetSession("flash", "Error hashing password. Check logs.", w, r)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 		err = state.UpdatePass(username, hash)
 		if err != nil {
-			panic(err)
+			check(err)
+			state.SetSession("flash", "Error updating password. Check logs.", w, r)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
@@ -808,7 +801,9 @@ func (state *AuthState) AdminUserDeletePostHandler(w http.ResponseWriter, r *htt
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		err := state.DeleteUser(username)
 		if err != nil {
-			panic(err)
+			check(err)
+			state.SetSession("flash", "Error deleting user. Check logs.", w, r)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 		state.SetSession("flash", "Successfully deleted '"+username+"'.", w, r)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
@@ -832,9 +827,9 @@ func (state *AuthState) SignupPostHandler(w http.ResponseWriter, r *http.Request
 		password := template.HTMLEscapeString(r.FormValue("password"))
 		err := state.NewUser(username, password)
 		if err != nil {
+			check(err)
 			state.SetSession("flash", "User registration failed.", w, r)
-			log.Println("Error registering user", err)
-			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		state.SetSession("flash", "Successful user registration.", w, r)
