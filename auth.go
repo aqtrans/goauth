@@ -305,7 +305,7 @@ func GetFlash(c context.Context) string {
 func (state *State) BoltAuth(username, password string) bool {
 
 	// Catch non-existent users before wasting CPU cycles checking hashes
-	if !state.doesUserExist(username) {
+	if !state.DoesUserExist(username) {
 		log.Println(username + " does not exist but trying to login.")
 		return false
 	}
@@ -344,7 +344,7 @@ func (state *State) BoltAuth(username, password string) bool {
 }
 
 // Check if user actually exists
-func (state *State) doesUserExist(username string) bool {
+func (state *State) DoesUserExist(username string) bool {
 	var db *bolt.DB
 	var err error
 	db, err = state.getDB()
@@ -615,7 +615,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		if username != "" {
 			// Check if user actually exists before setting username
 			// If user does not exist, clear the session because something fishy is going on
-			if !state.doesUserExist(username) {
+			if !state.DoesUserExist(username) {
 				log.Println("auth.UserEnvMiddle ERROR: Somehow a non-existent user was found in a cookie!")
 				log.Println(username)
 				username = ""
