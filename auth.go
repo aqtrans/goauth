@@ -14,7 +14,9 @@ package auth
 //   - AdminUser specified is made an Admin, so only one admin
 //   - Boltdb powered, using a Users buckets
 //   - Success/failure is delivered via a redirect and a flash message
-//   -
+
+// Context is used heavily. UserEnvMiddle tosses the flash/user info from cookies into context,
+//   and also checks that the specified user from the cookie exists.
 
 /* Example for using auth.State in an app:
 In main()
