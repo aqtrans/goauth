@@ -1,0 +1,36 @@
+image: golang:latest
+
+before_script:
+  - ln -s /builds /go/src/jba.io
+  - cd /go/src/jba.io/go/auth
+
+stages:
+  - install-environment
+  - build
+  - test
+
+install-go:
+  stage: install-environment
+  script:
+    - go version
+    - echo $PATH
+    - echo $GOPATH
+    - go env
+    - which go
+
+build-my-project:
+  stage: build
+  script:
+    - go get -u github.com/kardianos/govendor
+    - govendor sync
+    - go get -d
+    - go build
+
+test-my-project:
+  stage: test
+  coverage: '/coverage: \d+\.\d+/'
+  script:
+    - go get -d  
+    - go test -v
+    - go test -race
+    - go test -cover
