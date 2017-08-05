@@ -1,3 +1,6 @@
+[![build status](https://git.jba.io/go/auth/badges/master/build.svg)](https://git.jba.io/go/auth/commits/master)
+[![coverage report](https://git.jba.io/go/auth/badges/master/coverage.svg)](https://git.jba.io/go/auth/commits/master)
+
 **Note: This library depends on the 'context' library integrated into stdlib in Go 1.7**
 
 This is a library I wrote when I found existing http auth libraries lacking in one area or another.  
