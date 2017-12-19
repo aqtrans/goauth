@@ -35,10 +35,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"runtime"
-	"strings"
 	"text/template"
 	"time"
 
@@ -52,15 +50,17 @@ type key int
 const UserKey key = 1
 const MsgKey key = 2
 
-var authInfoBucketName = []byte("AuthInfo")
-var hashKeyName = []byte("HashKey")
-var blockKeyName = []byte("BlockKey")
-var userInfoBucketName = []byte("Users")
-
-var userDoesntExist = errors.New("User does not exist")
-
-// Debug variable can be set to true to have debugging info logged, otherwise silent
-var Debug = false
+var (
+	authInfoBucketName = []byte("AuthInfo")
+	hashKeyName        = []byte("HashKey")
+	blockKeyName       = []byte("BlockKey")
+	userInfoBucketName = []byte("Users")
+	userDoesntExist    = errors.New("User does not exist")
+	// Debug variable can be set to true to have debugging info logged, otherwise silent
+	Debug = false
+	// LoginPath is the path to the login page, used to redirect protected pages
+	LoginPath = "/login"
+)
 
 // State holds all required info to get authentication working in the app
 type State struct {
@@ -206,6 +206,12 @@ func (state *State) SetSession(key, val string, w http.ResponseWriter, r *http.R
 
 }
 
+// SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
+//   middleware, pushes the message into context and then template
+func (state *State) SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
+	state.SetSession("flash", msg, w, r)
+}
+
 func (state *State) ReadSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
 	if cookie, err := r.Cookie(key); err == nil {
 		err := state.cookie.Decode(key, cookie.Value, &value)
@@ -215,12 +221,6 @@ func (state *State) ReadSession(key string, w http.ResponseWriter, r *http.Reque
 		}
 	}
 	return value
-}
-
-// SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
-//   middleware, pushes the message into context and then template
-func (state *State) SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
-	state.SetSession("flash", msg, w, r)
 }
 
 // ClearSession currently only clearing the user value
@@ -404,11 +404,6 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
-// Redirect back to given page after successful login or signup.
-func postRedir(w http.ResponseWriter, r *http.Request, name string) {
-	http.Redirect(w, r, name, http.StatusSeeOther)
-}
-
 // NewUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
 func (state *State) NewUser(username, password string) error {
@@ -542,21 +537,19 @@ func (state *State) UpdatePass(username string, hash []byte) error {
 	return err
 }
 
+// Redirect throws the r.URL.Path into a cookie named "redirect" and redirects to the login page
+func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
+	// Save URL in cookie for later use
+	state.SetSession("redirect", r.URL.Path, w, r)
+	// Redirect to the login page, should be at LoginPath
+	http.Redirect(w, r, LoginPath, http.StatusSeeOther)
+	return
+}
+
 func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		//username := getUsernameFromCookie(r)
-		//username, _ := GetUsername(r.Context())
-		//if username == "" {
 		if !IsLoggedIn(r.Context()) {
-			rurl := r.URL.String()
-			// Detect if we're in an endless loop, if so, just redirect to root
-			if strings.HasPrefix(rurl, "login?url=/login") {
-				log.Println("AUTH ERR AuthMiddle is in an endless redirect loop")
-				http.Redirect(w, r, "http://"+r.Host+"/login", 302)
-				return
-			}
-			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
-			return
+			Redirect(state, w, r)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -565,15 +558,7 @@ func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !IsLoggedIn(r.Context()) {
-			rurl := r.URL.String()
-			// Detect if we're in an endless loop, if so, just redirect to root
-			if strings.HasPrefix(rurl, "login?url=/login") {
-				log.Println("AUTH ERR AuthMiddle is in an endless redirect loop")
-				http.Redirect(w, r, "http://"+r.Host+"/login", 302)
-				return
-			}
-			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
-			return
+			Redirect(state, w, r)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -584,21 +569,13 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		username, isAdmin := GetUsername(r.Context())
 		//if username == "" {
 		if !IsLoggedIn(r.Context()) {
-			rurl := r.URL.String()
-			// Detect if we're in an endless loop, if so, just redirect to root
-			if strings.HasPrefix(rurl, "login?url=/login") {
-				log.Println("AUTH ERR AuthAdminMiddle is in an endless redirect loop")
-				http.Redirect(w, r, "http://"+r.Host+"/login", 302)
-				return
-			}
-			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+rurl, 302)
-			return
+			Redirect(state, w, r)
 		}
 		//If user is not an Admin, just redirect to index
 		if !isAdmin {
-			log.Println(username + " attempting to access restricted URL.")
+			log.Println(username + " attempting to access " + r.URL.Path)
 			state.SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
-			postRedir(w, r, "/")
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -648,6 +625,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 	})
 }
 
+/*
 func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		username := state.getUsernameFromCookie(r, w)
@@ -659,6 +637,7 @@ func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 	}
 	return http.HandlerFunc(handler)
 }
+*/
 
 func (state *State) dbInit() error {
 	var db *bolt.DB
@@ -745,7 +724,7 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			check(err)
 			state.SetSession("flash", "Error adding user. Check logs.", w, r)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
 		state.SetSession("flash", "Successfully added '"+username+"' user.", w, r)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
@@ -774,13 +753,13 @@ func (state *State) AdminUserPassChangePostHandler(w http.ResponseWriter, r *htt
 			// couldn't hash password for some reason
 			check(err)
 			state.SetSession("flash", "Error hashing password. Check logs.", w, r)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
 		err = state.UpdatePass(username, hash)
 		if err != nil {
 			check(err)
 			state.SetSession("flash", "Error updating password. Check logs.", w, r)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
 		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
@@ -805,7 +784,7 @@ func (state *State) AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Re
 		if err != nil {
 			check(err)
 			state.SetSession("flash", "Error deleting user. Check logs.", w, r)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
 		state.SetSession("flash", "Successfully deleted '"+username+"'.", w, r)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
@@ -831,7 +810,7 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			check(err)
 			state.SetSession("flash", "User registration failed.", w, r)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 			return
 		}
 		state.SetSession("flash", "Successful user registration.", w, r)
@@ -847,7 +826,7 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
-// Comparing values with LDAP or configured username/password combos
+// Comparing values with BoltDB values
 func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
@@ -855,27 +834,24 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		// Handle login POST request
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		referer, _ := url.Parse(r.Referer())
-		// Check if we have a ?url= query string, from AuthMiddle
-		// Otherwise, just use the referrer
-		var r2 string
-		r2 = referer.Query().Get("url")
-		if r2 == "" {
-			r2 = r.Referer()
-			// if r.Referer is blank, just redirect to index
-			if r.Referer() == "" || referer.RequestURI() == "/login" {
-				r2 = "/"
-			}
-		}
+
 		// Login authentication
 		if state.BoltAuth(username, password) {
 			state.SetSession("user", username, w, r)
 			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
-			http.Redirect(w, r, r2, http.StatusSeeOther)
+			// Check if we have a redirect URL in the cookie, if so redirect to it
+			redirURL := state.ReadSession("redirect", w, r)
+			if redirURL != "" {
+				log.Println("Redirecting to", redirURL)
+				http.Redirect(w, r, redirURL, http.StatusSeeOther)
+			} else {
+				http.Redirect(w, r, "/", http.StatusSeeOther)
+			}
+
 			return
 		}
 		state.SetSession("flash", "User '"+username+"' failed to login. Please check your credentials and try again.", w, r)
-		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 		return
 	case "PUT":
 		// Update an existing record.
