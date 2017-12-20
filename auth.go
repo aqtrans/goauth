@@ -325,6 +325,8 @@ func (state *State) BoltAuth(username, password string) bool {
 
 	// Catch non-existent users before wasting CPU cycles checking hashes
 	if !state.DoesUserExist(username) {
+		// Add a 10ms delay so it's not too obvious that the user does not exist
+		time.Sleep(10 * time.Millisecond)
 		log.Println(username + " does not exist but trying to login.")
 		return false
 	}
