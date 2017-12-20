@@ -225,22 +225,39 @@ func (state *State) ReadSession(key string, w http.ResponseWriter, r *http.Reque
 
 // ClearSession currently only clearing the user value
 // The CSRF token should always be around due to the login form and such
-func (state *State) ClearSession(key string, w http.ResponseWriter, r *http.Request) {
-	state.SetSession(key, "", w, r)
+func (state *State) ClearSession(key string, w http.ResponseWriter) {
+	//state.SetSession(key, "", w, r)
+	cookie := &http.Cookie{
+		Name:     key,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Now().Add(-7 * 24 * time.Hour),
+		HttpOnly: true,
+	}
+	http.SetCookie(w, cookie)
 }
 
-func (state *State) clearFlash(w http.ResponseWriter, r *http.Request) {
-	state.ClearSession("flash", w, r)
+func (state *State) clearFlash(w http.ResponseWriter) {
+	state.ClearSession("flash", w)
 }
 
 func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
 	return state.ReadSession("user", w, r)
 }
 
+func (state *State) getRedirectFromCookie(r *http.Request, w http.ResponseWriter) (redirURL string) {
+	redirURL = state.ReadSession("redirect", w, r)
+	if redirURL != "" {
+		state.ClearSession("redirect", w)
+	}
+	return redirURL
+}
+
 func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
 	message = state.ReadSession("flash", w, r)
 	if message != "" {
-		state.clearFlash(w, r)
+		state.clearFlash(w)
 	}
 	return message
 }
@@ -400,7 +417,7 @@ func (state *State) getAuthInfo() (hashkey, blockkey []byte) {
 }
 
 func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	state.ClearSession("user", w, r)
+	state.ClearSession("user", w)
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
@@ -598,7 +615,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 				log.Println("auth.UserEnvMiddle ERROR: Somehow a non-existent user was found in a cookie!")
 				log.Println(username)
 				username = ""
-				state.ClearSession("user", w, r)
+				state.ClearSession("user", w)
 			}
 
 			// If username is the configured defaultUser, set context to reflect this
@@ -840,15 +857,13 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			state.SetSession("user", username, w, r)
 			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
-			redirURL := state.ReadSession("redirect", w, r)
+			redirURL := state.getRedirectFromCookie(r, w)
 			if redirURL != "" {
 				log.Println("Redirecting to", redirURL)
 				http.Redirect(w, r, redirURL, http.StatusSeeOther)
-			} else {
-				http.Redirect(w, r, "/", http.StatusSeeOther)
+				return
 			}
-
-			return
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 		state.SetSession("flash", "User '"+username+"' failed to login. Please check your credentials and try again.", w, r)
 		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
