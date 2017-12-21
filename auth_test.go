@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 )
@@ -146,6 +148,27 @@ func TestContext(t *testing.T) {
 	msgC := GetFlash(ctx)
 	if msgC != f.Msg {
 		t.Error("msgC does not equal f.Msg")
+	}
+
+}
+
+func TestCookies(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	w := httptest.NewRecorder()
+
+	authState.SetSession("omg", "testing", w)
+
+	request := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
+
+	if authState.ReadSession("omg", w, request) != "testing" {
+		t.Error("Cookie value is unable to be decoded")
 	}
 
 }
