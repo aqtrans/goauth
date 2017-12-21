@@ -192,7 +192,7 @@ func fromFlashContext(c context.Context) (*Flash, bool) {
 
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for user info and related flash messages
-func (state *State) SetSession(key, val string, w http.ResponseWriter, r *http.Request) {
+func (state *State) SetSession(key, val string, w http.ResponseWriter) {
 
 	if encoded, err := state.cookie.Encode(key, val); err == nil {
 		cookie := &http.Cookie{
@@ -209,7 +209,7 @@ func (state *State) SetSession(key, val string, w http.ResponseWriter, r *http.R
 // SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
 //   middleware, pushes the message into context and then template
 func (state *State) SetFlash(msg string, w http.ResponseWriter, r *http.Request) {
-	state.SetSession("flash", msg, w, r)
+	state.SetSession("flash", msg, w)
 }
 
 func (state *State) ReadSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -217,7 +217,7 @@ func (state *State) ReadSession(key string, w http.ResponseWriter, r *http.Reque
 		err := state.cookie.Decode(key, cookie.Value, &value)
 		if err != nil {
 			debugln("Error decoding cookie " + key + " value")
-			state.SetSession(key, "", w, r)
+			state.SetSession(key, "", w)
 		}
 	}
 	return value
@@ -559,7 +559,7 @@ func (state *State) UpdatePass(username string, hash []byte) error {
 // Redirect throws the r.URL.Path into a cookie named "redirect" and redirects to the login page
 func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	// Save URL in cookie for later use
-	state.SetSession("redirect", r.URL.Path, w, r)
+	state.SetSession("redirect", r.URL.Path, w)
 	// Redirect to the login page, should be at LoginPath
 	http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 	return
@@ -593,7 +593,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//If user is not an Admin, just redirect to index
 		if !isAdmin {
 			log.Println(username + " attempting to access " + r.URL.Path)
-			state.SetSession("flash", "Sorry, you are not allowed to see that.", w, r)
+			state.SetSession("flash", "Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -742,10 +742,10 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 		err := state.NewUser(username, password)
 		if err != nil {
 			check(err)
-			state.SetSession("flash", "Error adding user. Check logs.", w, r)
+			state.SetSession("flash", "Error adding user. Check logs.", w)
 			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
-		state.SetSession("flash", "Successfully added '"+username+"' user.", w, r)
+		state.SetSession("flash", "Successfully added '"+username+"' user.", w)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		return
 	case "PUT":
@@ -771,16 +771,16 @@ func (state *State) AdminUserPassChangePostHandler(w http.ResponseWriter, r *htt
 		if err != nil {
 			// couldn't hash password for some reason
 			check(err)
-			state.SetSession("flash", "Error hashing password. Check logs.", w, r)
+			state.SetSession("flash", "Error hashing password. Check logs.", w)
 			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
 		err = state.UpdatePass(username, hash)
 		if err != nil {
 			check(err)
-			state.SetSession("flash", "Error updating password. Check logs.", w, r)
+			state.SetSession("flash", "Error updating password. Check logs.", w)
 			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
-		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w, r)
+		state.SetSession("flash", "Successfully changed '"+username+"' users password.", w)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		return
 	case "PUT":
@@ -802,10 +802,10 @@ func (state *State) AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Re
 		err := state.DeleteUser(username)
 		if err != nil {
 			check(err)
-			state.SetSession("flash", "Error deleting user. Check logs.", w, r)
+			state.SetSession("flash", "Error deleting user. Check logs.", w)
 			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		}
-		state.SetSession("flash", "Successfully deleted '"+username+"'.", w, r)
+		state.SetSession("flash", "Successfully deleted '"+username+"'.", w)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		return
 	case "PUT":
@@ -828,11 +828,11 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		err := state.NewUser(username, password)
 		if err != nil {
 			check(err)
-			state.SetSession("flash", "User registration failed.", w, r)
+			state.SetSession("flash", "User registration failed.", w)
 			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 			return
 		}
-		state.SetSession("flash", "Successful user registration.", w, r)
+		state.SetSession("flash", "Successful user registration.", w)
 		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 		return
 	case "PUT":
@@ -856,8 +856,8 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Login authentication
 		if state.BoltAuth(username, password) {
-			state.SetSession("user", username, w, r)
-			state.SetSession("flash", "User '"+username+"' successfully logged in.", w, r)
+			state.SetSession("user", username, w)
+			state.SetSession("flash", "User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
 			//redirURL := state.getRedirectFromCookie(r, w)
 			redirURL := state.ReadSession("redirect", w, r)
@@ -870,7 +870,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		state.SetSession("flash", "User '"+username+"' failed to login. Please check your credentials and try again.", w, r)
+		state.SetSession("flash", "User '"+username+"' failed to login. Please check your credentials and try again.", w)
 		http.Redirect(w, r, LoginPath, http.StatusFound)
 		return
 	case "PUT":
