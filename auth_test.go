@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -58,6 +59,30 @@ func TestBolt(t *testing.T) {
 	if !authState.BoltAuth("adminTest", "test") {
 		t.Fatal("ERR: cannot login for some reason!")
 	}
+	if authState.BoltAuth("adminTest2", "test") {
+		t.Fatal("ERR: non-existent user can login for some reason!")
+	}
+	if authState.BoltAuth("adminTest", "test2") {
+		t.Fatal("ERR: user can login with bad password for some reason!")
+	}
+
+	pass2, err := HashPassword([]byte("test2"))
+	if err != nil {
+		t.Error(err)
+	}
+	err = authState.UpdatePass("adminTest", pass2)
+	if err != nil {
+		t.Error(err)
+	}
+	if !authState.BoltAuth("adminTest", "test2") {
+		t.Fatal("ERR: cannot login after changing password for some reason!")
+	}
+
+	err = authState.UpdatePass("adminTest2", pass2)
+	if err == nil {
+		t.Error("Able to update password for non-existent user")
+	}
+
 	err = authState.DeleteUser("adminTest")
 	if err != nil {
 		t.Fatal(err)
@@ -65,4 +90,62 @@ func TestBolt(t *testing.T) {
 	if authState.DoesUserExist("adminTest") {
 		t.Fatal("ERR: adminTest user exists after deleting!")
 	}
+}
+
+func TestContext(t *testing.T) {
+	// Try fetching without anything in the context first
+	ctx := context.Background()
+
+	username1, isAdmin1 := GetUsername(ctx)
+	if username1 != "" {
+		t.Error("username1 from context is not blank")
+	}
+	if isAdmin1 {
+		t.Error("isAdmin1 from context is not false")
+	}
+
+	if IsLoggedIn(ctx) {
+		t.Error("IsLoggedIn from context is not false")
+	}
+
+	userC1 := GetUserState(ctx)
+	if userC1 != nil {
+		t.Error("userC1.username has something in it")
+	}
+
+	// Now make a context
+	u := &User{
+		Username: "admin",
+		IsAdmin:  true,
+	}
+
+	ctx = newUserContext(ctx, u)
+
+	username2, isAdmin2 := GetUsername(ctx)
+	if username2 != "admin" {
+		t.Error("username2 from context does not equal admin")
+	}
+	if !isAdmin2 {
+		t.Error("isAdmin2 from context is not true")
+	}
+
+	if !IsLoggedIn(ctx) {
+		t.Error("IsLoggedIn from context is not true")
+	}
+
+	userC2 := GetUserState(ctx)
+	if userC2.Username != "admin" {
+		t.Error("userC2.username does not equal admin")
+	}
+
+	f := &Flash{
+		Msg: "message",
+	}
+	ctx = newFlashContext(ctx, f)
+
+	msgC := GetFlash(ctx)
+	if msgC != f.Msg {
+		t.Error("msgC does not equal f.Msg")
+	}
+
 }
