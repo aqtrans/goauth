@@ -5,6 +5,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	//"net/url"
 	"os"
 	"testing"
 )
@@ -170,5 +172,71 @@ func TestCookies(t *testing.T) {
 	if authState.ReadSession("omg", w, request) != "testing" {
 		t.Error("Cookie value is unable to be decoded")
 	}
+
+}
+
+func TestFailedLogin(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	// Attempt a bad login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin1")
+	request.Form.Add("password", "admin1")
+	authState.LoginPostHandler(w, request)
+	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+	//t.Log(w.HeaderMap["Set-Cookie"])
+
+	// Fail if we are not redirected to /login
+	if w.Header().Get("Location") != "/login" {
+		t.Error("Failed login was not redirected to /login")
+	}
+
+	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
+		if authState.ReadSession("flash", w, request) != "testing" {
+			t.Error("Flash message was not a failed login message")
+		}
+	*/
+
+}
+
+func TestSuccessfulLogin(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin")
+	request.Form.Add("password", "admin")
+	authState.LoginPostHandler(w, request)
+	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+	//t.Log(w.HeaderMap["Set-Cookie"])
+
+	if w.Header().Get("Location") != "/" {
+		t.Error("Successful login was not redirected to /")
+	}
+	
+
+	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
+		if authState.ReadSession("flash", w, request) != "testing" {
+			t.Error("Flash message was not a failed login message")
+		}
+	*/
 
 }
