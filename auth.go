@@ -202,6 +202,8 @@ func (state *State) SetSession(key, val string, w http.ResponseWriter) {
 			HttpOnly: true,
 		}
 		http.SetCookie(w, cookie)
+	} else {
+		debugln("Error encoding cookie " + key + " value")
 	}
 
 }
@@ -216,9 +218,11 @@ func (state *State) ReadSession(key string, w http.ResponseWriter, r *http.Reque
 	if cookie, err := r.Cookie(key); err == nil {
 		err := state.cookie.Decode(key, cookie.Value, &value)
 		if err != nil {
-			debugln("Error decoding cookie " + key + " value")
+			debugln("Error decoding cookie value for", key, err)
 			state.SetSession(key, "", w)
 		}
+	} else {
+		debugln("Error reading cookie", key, err)
 	}
 	return value
 }
@@ -618,19 +622,19 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 				log.Println(username)
 				username = ""
 				state.ClearSession("user", w)
-			}
+			} else {
+				// If username is the configured defaultUser, set context to reflect this
+				isAdmin := false
+				if username == state.defaultUser {
+					isAdmin = true
+				}
+				u := &User{
+					Username: username,
+					IsAdmin:  isAdmin,
+				}
 
-			// If username is the configured defaultUser, set context to reflect this
-			isAdmin := false
-			if username == state.defaultUser {
-				isAdmin = true
+				newc = newUserContext(newc, u)
 			}
-			u := &User{
-				Username: username,
-				IsAdmin:  isAdmin,
-			}
-
-			newc = newUserContext(newc, u)
 		}
 
 		if message != "" {
