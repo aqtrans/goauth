@@ -31,8 +31,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -49,14 +49,14 @@ import (
 type key int
 
 const (
-	UserKey key = 1
-	MsgKey key = 2
-	authInfoBucketName = "AuthInfo"
-	hashKeyName = "HashKey"
-	blockKeyName = "BlockKey"
-	userInfoBucketName = "Users"
-	roleAdmin = "admin"
-	roleUser = "user"
+	UserKey            key = 1
+	MsgKey             key = 2
+	authInfoBucketName     = "AuthInfo"
+	hashKeyName            = "HashKey"
+	blockKeyName           = "BlockKey"
+	userInfoBucketName     = "Users"
+	roleAdmin              = "admin"
+	roleUser               = "user"
 )
 
 var (
@@ -64,7 +64,7 @@ var (
 	//hashKeyName        = []byte("HashKey")
 	//blockKeyName       = []byte("BlockKey")
 	//userInfoBucketName = []byte("Users")
-	userDoesntExist    = errors.New("User does not exist")
+	userDoesntExist = errors.New("User does not exist")
 	// Debug variable can be set to true to have debugging info logged, otherwise silent
 	Debug = false
 	// LoginPath is the path to the login page, used to redirect protected pages
@@ -73,8 +73,8 @@ var (
 
 // State holds all required info to get authentication working in the app
 type State struct {
-	BoltDB      *DB
-	cookie      *securecookie.SecureCookie
+	BoltDB *DB
+	cookie *securecookie.SecureCookie
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -91,7 +91,7 @@ type authInfo struct {
 type User struct {
 	Username string
 	Password []byte
-	Role string
+	Role     string
 }
 
 type Flash struct {
@@ -313,7 +313,7 @@ func GetUserState(c context.Context) *User {
 		if userC.Username != "" {
 			return &User{
 				Username: userC.Username,
-				Role: userC.Role,
+				Role:     userC.Role,
 			}
 		}
 	}
@@ -340,7 +340,7 @@ func GetFlash(c context.Context) string {
 func (user *User) IsAdmin() bool {
 	if user.Role == roleAdmin {
 		return true
-	}	
+	}
 	return false
 }
 
@@ -362,6 +362,7 @@ func (state *State) BoltAuth(username, password string) bool {
 	}
 	defer state.releaseDB()
 
+	var user *User
 	// Grab given user's password from Bolt
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
@@ -369,7 +370,13 @@ func (state *State) BoltAuth(username, password string) bool {
 		if v == nil {
 			return userDoesntExist
 		}
-		err = CheckPasswordHash(v, []byte(password))
+
+		err := json.Unmarshal(v, &user)
+		if err != nil {
+			check(err)
+			return err
+		}
+		err = CheckPasswordHash(user.Password, []byte(password))
 		if err != nil {
 			// Incorrect password, malformed hash, etc.
 			debugln("error verifying password for user " + username)
@@ -459,7 +466,7 @@ func (state *State) GetUserInfo(username string) *User {
 
 		return b.Put([]byte(title), encoded)
 	*/
-	
+
 }
 
 func (state *State) getAuthInfo() (hashkey, blockkey []byte) {
@@ -528,16 +535,21 @@ func (state *State) NewUser(username, password, role string) error {
 		return viewerr
 	}
 
-	if role != roleAdmin {
-		return errors.New("NewUser role is invalid")
-	} else if role != roleUser {
-		return errors.New("NewUser role is invalid")
+	var validRole bool
+	if role == roleAdmin {
+		validRole = true
+	} else if role == roleUser {
+		validRole = true
+	}
+
+	if !validRole {
+		return errors.New("NewUser role is invalid:" + role)
 	}
 
 	u := &User{
 		Username: username,
 		Password: hash,
-		Role: role,
+		Role:     role,
 	}
 
 	userEncoded, err := json.Marshal(u)
@@ -635,7 +647,23 @@ func (state *State) UpdatePass(username string, hash []byte) error {
 		if userbucketUser == nil {
 			return userDoesntExist
 		}
-		err := userbucket.Put([]byte(username), hash)
+
+		var user *User
+		err := json.Unmarshal(userbucketUser, &user)
+		if err != nil {
+			check(err)
+			return err
+		}
+
+		user.Password = hash
+
+		encoded, err := json.Marshal(user)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
+
+		err = userbucket.Put([]byte(username), encoded)
 		if err != nil {
 			return err
 		}
