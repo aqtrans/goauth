@@ -32,7 +32,7 @@ func tempfile() string {
 
 func TestBolt(t *testing.T) {
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb, "admin")
+	authState, err := NewAuthState(tmpdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestBolt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = authState.NewUser("adminTest", "test")
+	err = authState.NewUser("adminTest", "test", roleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,12 +100,9 @@ func TestContext(t *testing.T) {
 	// Try fetching without anything in the context first
 	ctx := context.Background()
 
-	username1, isAdmin1 := GetUsername(ctx)
-	if username1 != "" {
-		t.Error("username1 from context is not blank")
-	}
-	if isAdmin1 {
-		t.Error("isAdmin1 from context is not false")
+	user := GetUserState(ctx)
+	if user != nil {
+		t.Error("user from context is not nil")
 	}
 
 	if IsLoggedIn(ctx) {
@@ -120,16 +117,16 @@ func TestContext(t *testing.T) {
 	// Now make a context
 	u := &User{
 		Username: "admin",
-		IsAdmin:  true,
+		Role:     roleAdmin,
 	}
 
 	ctx = newUserContext(ctx, u)
 
-	username2, isAdmin2 := GetUsername(ctx)
-	if username2 != "admin" {
+	user2 := GetUserState(ctx)
+	if user2.Username != "admin" {
 		t.Error("username2 from context does not equal admin")
 	}
-	if !isAdmin2 {
+	if !user2.IsAdmin() {
 		t.Error("isAdmin2 from context is not true")
 	}
 
@@ -157,7 +154,7 @@ func TestContext(t *testing.T) {
 func TestCookies(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb, "admin")
+	authState, err := NewAuthState(tmpdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +175,7 @@ func TestCookies(t *testing.T) {
 func TestFailedLogin(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb, "admin")
+	authState, err := NewAuthState(tmpdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,9 +198,9 @@ func TestFailedLogin(t *testing.T) {
 	}
 
 	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
-		if authState.ReadSession("flash", w, request) != "testing" {
-			t.Error("Flash message was not a failed login message")
-		}
+	if authState.ReadSession("flash", w, request) != "testing" {
+		t.Error("Flash message was not a failed login message")
+	}
 	*/
 
 }
@@ -211,11 +208,13 @@ func TestFailedLogin(t *testing.T) {
 func TestSuccessfulLogin(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb, "admin")
+	authState, err := NewAuthState(tmpdb)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(tmpdb)
+
+	authState.NewUser("admin", "admin", roleAdmin)
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
@@ -229,14 +228,15 @@ func TestSuccessfulLogin(t *testing.T) {
 	//t.Log(w.HeaderMap["Set-Cookie"])
 
 	if w.Header().Get("Location") != "/" {
+		t.Log(w.HeaderMap)
+		t.Log(authState.ReadSession("flash", w, request))
 		t.Error("Successful login was not redirected to /")
 	}
-	
 
 	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
-		if authState.ReadSession("flash", w, request) != "testing" {
-			t.Error("Flash message was not a failed login message")
-		}
+	if authState.ReadSession("flash", w, request) != "testing" {
+		t.Error("Flash message was not a failed login message")
+	}
 	*/
 
 }
