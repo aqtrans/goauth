@@ -89,7 +89,7 @@ type authInfo struct {
 }
 
 type User struct {
-	Username string
+	username string
 	Password []byte
 	Role     string
 }
@@ -293,15 +293,9 @@ func GetUsername(c context.Context) (username, role string) {
 // IsLoggedIn takes a context, tries to fetch user{} from it,
 //  and if that succeeds, verifies the username fetched actually exists
 func IsLoggedIn(c context.Context) bool {
-	userC, ok := fromUserContext(c)
-	if ok {
-		// If username is in a context, and that user exists, return true
-		if userC.Username != "" {
-			return true
-		}
-	}
-	if !ok {
-		debugln("Error IsLoggedIn not OK")
+	u := GetUserState(c)
+	if u != nil {
+		return true
 	}
 	return false
 }
@@ -310,9 +304,9 @@ func GetUserState(c context.Context) *User {
 	userC, ok := fromUserContext(c)
 	if ok {
 		// If username is in a context, and that user exists, return that User info
-		if userC.Username != "" {
+		if userC != nil {
 			return &User{
-				Username: userC.Username,
+				username: userC.username,
 				Role:     userC.Role,
 			}
 		}
@@ -338,7 +332,24 @@ func GetFlash(c context.Context) string {
 }
 
 func (user *User) IsAdmin() bool {
-	if user.Role == roleAdmin {
+	if user != nil {
+		if user.Role == roleAdmin {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (user *User) Username() string {
+	if user != nil {
+		return user.username
+	}
+	return ""
+}
+
+func (user *User) IsLoggedIn() bool {
+	if user != nil {
 		return true
 	}
 	return false
@@ -547,7 +558,7 @@ func (state *State) NewUser(username, password, role string) error {
 	}
 
 	u := &User{
-		Username: username,
+		username: username,
 		Password: hash,
 		Role:     role,
 	}
@@ -709,7 +720,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		}
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
-			log.Println(user.Username + " attempting to access " + r.URL.Path)
+			log.Println(user.Username() + " attempting to access " + r.URL.Path)
 			state.setSession("flash", "Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
