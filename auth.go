@@ -433,6 +433,7 @@ func (state *State) GetUserInfo(username string) *User {
 		err := proto.Unmarshal(v, &user)
 		if err != nil {
 			check(err)
+			return err
 		}
 		return nil
 	})
