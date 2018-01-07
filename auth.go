@@ -31,7 +31,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -42,6 +41,7 @@ import (
 	"time"
 
 	"github.com/boltdb/bolt"
+	proto "github.com/golang/protobuf/proto"
 	"github.com/gorilla/securecookie"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -55,8 +55,8 @@ const (
 	hashKeyName            = "HashKey"
 	blockKeyName           = "BlockKey"
 	userInfoBucketName     = "Users"
-	roleAdmin              = "admin"
-	roleUser               = "user"
+	//roleAdmin              = "admin"
+	//roleUser               = "user"
 )
 
 var (
@@ -86,12 +86,6 @@ type DB struct {
 type authInfo struct {
 	hashKey  []byte
 	blockKey []byte
-}
-
-type User struct {
-	username string
-	Password []byte
-	Role     string
 }
 
 type Flash struct {
@@ -303,13 +297,7 @@ func IsLoggedIn(c context.Context) bool {
 func GetUserState(c context.Context) *User {
 	userC, ok := fromUserContext(c)
 	if ok {
-		// If username is in a context, and that user exists, return that User info
-		if userC != nil {
-			return &User{
-				username: userC.username,
-				Role:     userC.Role,
-			}
-		}
+		return userC
 	}
 	if !ok {
 		debugln("No UserState in context.")
@@ -333,7 +321,7 @@ func GetFlash(c context.Context) string {
 
 func (user *User) IsAdmin() bool {
 	if user != nil {
-		if user.Role == roleAdmin {
+		if user.Role == User_ADMIN {
 			return true
 		}
 	}
@@ -343,7 +331,7 @@ func (user *User) IsAdmin() bool {
 
 func (user *User) Username() string {
 	if user != nil {
-		return user.username
+		return user.GetName()
 	}
 	return ""
 }
@@ -365,7 +353,7 @@ func (state *State) BoltAuth(username, password string) bool {
 	}
 	defer state.releaseDB()
 
-	var user *User
+	var user User
 	// Grab given user's password from Bolt
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
@@ -374,7 +362,7 @@ func (state *State) BoltAuth(username, password string) bool {
 			return userDoesntExist
 		}
 
-		err := json.Unmarshal(v, &user)
+		err := proto.Unmarshal(v, &user)
 		if err != nil {
 			check(err)
 			return err
@@ -427,7 +415,7 @@ func (state *State) DoesUserExist(username string) bool {
 
 // Get a *User from the bucket
 func (state *State) GetUserInfo(username string) *User {
-	var user *User
+	var user User
 	var db *bolt.DB
 	var err error
 	db, err = state.getDB()
@@ -442,7 +430,7 @@ func (state *State) GetUserInfo(username string) *User {
 		if v == nil {
 			return userDoesntExist
 		}
-		err := json.Unmarshal(v, &user)
+		err := proto.Unmarshal(v, &user)
 		if err != nil {
 			check(err)
 		}
@@ -452,7 +440,7 @@ func (state *State) GetUserInfo(username string) *User {
 		check(err)
 		return nil
 	}
-	return user
+	return &user
 
 	/*
 		s := &Shorturl{
@@ -504,16 +492,16 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (state *State) NewUser(username, password string) error {
-	return state.newUser(username, password, roleUser)
+	return state.newUser(username, password, User_USER)
 }
 
 func (state *State) NewAdmin(username, password string) error {
-	return state.newUser(username, password, roleAdmin)
+	return state.newUser(username, password, User_ADMIN)
 }
 
 // NewUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
-func (state *State) newUser(username, password, role string) error {
+func (state *State) newUser(username, password string, role User_Role) error {
 	var db *bolt.DB
 	var err error
 	db, err = state.getDB()
@@ -546,24 +534,13 @@ func (state *State) newUser(username, password, role string) error {
 		return viewerr
 	}
 
-	var validRole bool
-	if role == roleAdmin {
-		validRole = true
-	} else if role == roleUser {
-		validRole = true
-	}
-
-	if !validRole {
-		return errors.New("NewUser role is invalid:" + role)
-	}
-
 	u := &User{
-		username: username,
+		Name:     username,
 		Password: hash,
 		Role:     role,
 	}
 
-	userEncoded, err := json.Marshal(u)
+	userEncoded, err := proto.Marshal(u)
 	if err != nil {
 		check(err)
 		return err
@@ -659,8 +636,8 @@ func (state *State) UpdatePass(username string, hash []byte) error {
 			return userDoesntExist
 		}
 
-		var user *User
-		err := json.Unmarshal(userbucketUser, &user)
+		var user User
+		err := proto.Unmarshal(userbucketUser, &user)
 		if err != nil {
 			check(err)
 			return err
@@ -668,7 +645,7 @@ func (state *State) UpdatePass(username string, hash []byte) error {
 
 		user.Password = hash
 
-		encoded, err := json.Marshal(user)
+		encoded, err := proto.Marshal(&user)
 		if err != nil {
 			log.Println(err)
 			return err
