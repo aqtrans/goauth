@@ -357,14 +357,6 @@ func (user *User) IsLoggedIn() bool {
 
 func (state *State) BoltAuth(username, password string) bool {
 
-	// Catch non-existent users before wasting CPU cycles checking hashes
-	if !state.DoesUserExist(username) {
-		// Add a 10ms delay so it's not too obvious that the user does not exist
-		time.Sleep(10 * time.Millisecond)
-		log.Println(username + " does not exist but trying to login.")
-		return false
-	}
-
 	var db *bolt.DB
 	var err error
 	db, err = state.getDB()
@@ -390,7 +382,7 @@ func (state *State) BoltAuth(username, password string) bool {
 		err = CheckPasswordHash(user.Password, []byte(password))
 		if err != nil {
 			// Incorrect password, malformed hash, etc.
-			debugln("error verifying password for user " + username)
+			debugln("error verifying password for user", username, err)
 			return err
 		}
 		return nil
@@ -398,7 +390,7 @@ func (state *State) BoltAuth(username, password string) bool {
 
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
-		//debugln("error verifying password for user " + username)
+		debugln("error verifying password for user", username, err)
 		return false
 	}
 	// TODO: Should look into fleshing this out
