@@ -162,11 +162,11 @@ func TestCookies(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	authState.SetSession("omg", "testing", w)
+	authState.setSession("omg", "testing", w)
 
 	request := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
 
-	if authState.ReadSession("omg", w, request) != "testing" {
+	if authState.readSession("omg", w, request) != "testing" {
 		t.Error("Cookie value is unable to be decoded")
 	}
 
@@ -229,7 +229,7 @@ func TestSuccessfulLogin(t *testing.T) {
 
 	if w.Header().Get("Location") != "/" {
 		t.Log(w.HeaderMap)
-		t.Log(authState.ReadSession("flash", w, request))
+		t.Log(authState.readSession("flash", w, request))
 		t.Error("Successful login was not redirected to /")
 	}
 
