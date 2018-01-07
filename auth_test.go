@@ -53,7 +53,7 @@ func TestBolt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = authState.NewUser("adminTest", "test", roleAdmin)
+	err = authState.NewAdmin("adminTest", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestSuccessfulLogin(t *testing.T) {
 	}
 	defer os.Remove(tmpdb)
 
-	authState.NewUser("admin", "admin", roleAdmin)
+	authState.NewAdmin("admin", "admin")
 
 	// Attempt a good login
 	w := httptest.NewRecorder()

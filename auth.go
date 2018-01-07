@@ -503,9 +503,17 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
+func (state *State) NewUser(username, password string) error {
+	return state.newUser(username, password, roleUser)
+}
+
+func (state *State) NewAdmin(username, password string) error {
+	return state.newUser(username, password, roleAdmin)
+}
+
 // NewUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
-func (state *State) NewUser(username, password, role string) error {
+func (state *State) newUser(username, password, role string) error {
 	var db *bolt.DB
 	var err error
 	db, err = state.getDB()
@@ -819,7 +827,7 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := state.NewUser(username, password, roleUser)
+		err := state.NewUser(username, password)
 		if err != nil {
 			check(err)
 			state.setSession("flash", "Error adding user. Check logs.", w)
@@ -905,7 +913,7 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := state.NewUser(username, password, roleUser)
+		err := state.NewUser(username, password)
 		if err != nil {
 			check(err)
 			state.setSession("flash", "User registration failed.", w)
