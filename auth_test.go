@@ -116,8 +116,8 @@ func TestContext(t *testing.T) {
 
 	// Now make a context
 	u := &User{
-		Name: "admin",
-		Role: User_ADMIN,
+		username: "admin",
+		Role:     roleAdmin,
 	}
 
 	ctx = newUserContext(ctx, u)
