@@ -116,14 +116,14 @@ func TestContext(t *testing.T) {
 
 	// Now make a context
 	u := &User{
-		username: "admin",
-		Role:     roleAdmin,
+		Name: "admin",
+		Role: roleAdmin,
 	}
 
 	ctx = newUserContext(ctx, u)
 
 	user2 := GetUserState(ctx)
-	if user2.Username() != "admin" {
+	if user2.GetName() != "admin" {
 		t.Error("username2 from context does not equal admin")
 	}
 	if !user2.IsAdmin() {
@@ -135,7 +135,7 @@ func TestContext(t *testing.T) {
 	}
 
 	userC2 := GetUserState(ctx)
-	if userC2.Username() != "admin" {
+	if userC2.GetName() != "admin" {
 		t.Error("userC2.username does not equal admin")
 	}
 
