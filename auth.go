@@ -89,7 +89,7 @@ type authInfo struct {
 }
 
 type User struct {
-	username string
+	Name     string
 	Password []byte
 	Role     string
 }
@@ -303,13 +303,7 @@ func IsLoggedIn(c context.Context) bool {
 func GetUserState(c context.Context) *User {
 	userC, ok := fromUserContext(c)
 	if ok {
-		// If username is in a context, and that user exists, return that User info
-		if userC != nil {
-			return &User{
-				username: userC.username,
-				Role:     userC.Role,
-			}
-		}
+		return userC
 	}
 	if !ok {
 		debugln("No UserState in context.")
@@ -341,9 +335,9 @@ func (user *User) IsAdmin() bool {
 	return false
 }
 
-func (user *User) Username() string {
+func (user *User) GetName() string {
 	if user != nil {
-		return user.username
+		return user.Name
 	}
 	return ""
 }
@@ -559,7 +553,7 @@ func (state *State) newUser(username, password, role string) error {
 	}
 
 	u := &User{
-		username: username,
+		Name:     username,
 		Password: hash,
 		Role:     role,
 	}
@@ -721,7 +715,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		}
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
-			log.Println(user.Username() + " attempting to access " + r.URL.Path)
+			log.Println(user.GetName() + " attempting to access " + r.URL.Path)
 			state.setSession("flash", "Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
