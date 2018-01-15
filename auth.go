@@ -123,7 +123,7 @@ func (state *State) getDB() (*bolt.DB, error) {
 	//log.Println(state.BoltDB.path)
 	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		check(err)
+		log.Fatalln(err)
 		return nil, err
 	}
 	state.BoltDB.authdb = db
