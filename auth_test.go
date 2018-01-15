@@ -240,3 +240,13 @@ func TestSuccessfulLogin(t *testing.T) {
 	*/
 
 }
+
+func TestFails(t *testing.T) {
+	authState, err := NewAuthState("")
+	if err == nil {
+		t.Fatal(err)
+	}
+	if authState != nil {
+		t.Error("authState is not nil when fed an empty authdb location")
+	}
+}
