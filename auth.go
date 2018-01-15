@@ -123,7 +123,7 @@ func (state *State) getDB() (*bolt.DB, error) {
 	//log.Println(state.BoltDB.path)
 	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		log.Fatalln(err)
+		check(err)
 		return nil, err
 	}
 	state.BoltDB.authdb = db
@@ -143,12 +143,18 @@ func NewAuthState(path string) (*State, error) {
 
 // NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState
 func NewAuthStateWithDB(db *DB, path string) (*State, error) {
+	if path == "" {
+		return nil, errors.New("NewAuthStateWithDB: path is blank")
+	}
 	state := new(State)
 	state.BoltDB = db
 	state.BoltDB.path = path
 
 	err := state.dbInit()
-	check(err)
+	if err != nil {
+		check(err)
+		return nil, err
+	}
 
 	hash, block := state.getAuthInfo()
 	state.cookie = securecookie.New(hash, block)
