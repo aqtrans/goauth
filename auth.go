@@ -15,6 +15,9 @@ package auth
 //   - Boltdb powered, using a Users buckets
 //   - Success/failure is delivered via a redirect and a flash message
 
+// All cookies, flash messages and user info, are encrypted using gorilla/securecookie,
+//   and the HashKey and BlockKey are generated randomly and then are permanent per-db.
+
 // Context is used heavily. UserEnvMiddle tosses the flash/user info from cookies into context,
 //   and also checks that the specified user from the cookie exists.
 
@@ -22,7 +25,7 @@ package auth
 In main()
        // Bring up authState
        var err error
-       authState, err = auth.NewAuthState("./data/auth.db", "admin_username")
+       authState, err = auth.NewAuthState("./data/auth.db")
        check(err)
 Use authstate methods and handlers
 */
