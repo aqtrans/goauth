@@ -735,6 +735,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 
 //UserEnvMiddle grabs username, role, and flash message from cookie,
 // tosses it into the context for use in various other middlewares
+// Note: It grabs simply the username, and stores a full User{} in the context
 func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username := state.getUsernameFromCookie(r, w)
@@ -937,7 +938,7 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
-// Comparing values with BoltDB values
+// Comparing values with those in BoltDB, and if it passes, stores the verified username in the cookie
 func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
