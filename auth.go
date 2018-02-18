@@ -216,7 +216,7 @@ func newChkContext(c context.Context) context.Context {
 }
 
 func chkFromContext(c context.Context) bool {
-	_, ok := c.Value(MsgKey).(bool)
+	_, ok := c.Value(ChkKey).(bool)
 	return ok
 }
 
@@ -251,7 +251,7 @@ func (state *State) readSession(key string, w http.ResponseWriter, r *http.Reque
 			debugln("Error decoding cookie value for", key, err)
 			state.setSession(key, "", w)
 		}
-	} else {
+	} else if err != http.ErrNoCookie {
 		debugln("Error reading cookie", key, err)
 	}
 	return value
@@ -330,12 +330,16 @@ func GetUserState(c context.Context) *User {
 	if ok {
 		return userC
 	}
-	if !ok {
-		debugln("No UserState in context.")
-		if !chkFromContext(c) {
-			log.Println("ERR: UserEnvMiddle is not being used. This is required for most functions to work!")
+	/*
+		if !ok {
+			debugln("No UserState in context.")
+			pc, fn, line, ok := runtime.Caller(1)
+			details := runtime.FuncForPC(pc)
+			if ok && details != nil {
+				log.Printf("[auth.error] in %s[%s:%d]", details.Name(), fn, line)
+			}
 		}
-	}
+	*/
 	return nil
 }
 
@@ -698,7 +702,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		newc := r.Context()
 
 		// Add a little flag to tell whether this middleware has been hit
-		newc = newChkContext(newc)
+		//newc = newChkContext(newc)
 
 		if username != "" {
 			u := state.GetUserInfo(username)
