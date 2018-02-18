@@ -499,42 +499,20 @@ func (state *State) NewAdmin(username, password string) error {
 // NewUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
 func (state *State) newUser(username, password, role string) error {
-	db := state.getDB()
-	defer state.releaseDB()
 
-	// Hash password now so if it fails we catch it before touching Bolt
-	//hash, err := passlib.Hash(password)
+	// Check that the given role is valid before even opening the DB
+	switch role {
+	case roleAdmin, roleUser:
+	default:
+		return errors.New("NewUser role is invalid: " + role)
+	}
+
+	// Same for hasing; Hash password now so if it fails we catch it before touching Bolt
 	hash, err := HashPassword([]byte(password))
 	if err != nil {
 		// couldn't hash password for some reason
 		check(err)
 		return err
-	}
-
-	// If no existing user, store username and hash
-	viewerr := db.View(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte(userInfoBucketName))
-		userbucketUser := userbucket.Get([]byte(username))
-
-		// userbucketUser should be nil if user doesn't exist
-		if userbucketUser != nil {
-			return errors.New("User already exists")
-		}
-		return nil
-	})
-	if viewerr != nil {
-		return viewerr
-	}
-
-	var validRole bool
-	if role == roleAdmin {
-		validRole = true
-	} else if role == roleUser {
-		validRole = true
-	}
-
-	if !validRole {
-		return errors.New("NewUser role is invalid:" + role)
 	}
 
 	u := &User{
@@ -549,6 +527,8 @@ func (state *State) newUser(username, password, role string) error {
 		return err
 	}
 
+	db := state.getDB()
+	defer state.releaseDB()
 	//var vb []byte
 	adderr := db.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte("Users"))
