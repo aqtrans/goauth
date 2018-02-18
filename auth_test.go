@@ -250,3 +250,18 @@ func TestFails(t *testing.T) {
 		t.Error("authState is not nil when fed an empty authdb location")
 	}
 }
+
+func TestInvalidRole(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	err = authState.newUser("admin", "admin", "omg")
+	if err == nil {
+		t.Error("Role 'omg' was considered valid to state.newUser()!")
+	}
+}
