@@ -370,13 +370,6 @@ func (user *User) GetName() string {
 	return ""
 }
 
-func (user *User) IsLoggedIn() bool {
-	if user != nil {
-		return true
-	}
-	return false
-}
-
 func (state *State) BoltAuth(username, password string) bool {
 
 	db := state.getDB()
