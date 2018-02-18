@@ -506,15 +506,17 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, r.Referer(), 302)
 }
 
+// NewUser creates a new user with a given plaintext username and password
 func (state *State) NewUser(username, password string) error {
 	return state.newUser(username, password, roleUser)
 }
 
+// NewAdmin creates a new admin with a given plaintext username and password
 func (state *State) NewAdmin(username, password string) error {
 	return state.newUser(username, password, roleAdmin)
 }
 
-// NewUser is a dedicated function to create new users, taking plaintext username, password, and role
+// newUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
 func (state *State) newUser(username, password, role string) error {
 
