@@ -265,3 +265,370 @@ func TestInvalidRole(t *testing.T) {
 		t.Error("Role 'omg' was considered valid to state.newUser()!")
 	}
 }
+
+func TestClearSession(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin")
+	request.Form.Add("password", "admin")
+	authState.LoginPostHandler(w, request)
+
+	// After a good login, copy Cookie into a new request
+	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+	// Create a new recorder to get a clean HeaderMap that should then come back Expired and such
+	w2 := httptest.NewRecorder()
+
+	authState.LogoutHandler(w2, request)
+
+	request.Header = http.Header{"Cookie": w2.HeaderMap["Set-Cookie"]}
+
+	finalRequest := &http.Request{Header: http.Header{"Cookie": w2.HeaderMap["Set-Cookie"]}}
+	cookie, err := finalRequest.Cookie("user")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if cookie.Value != "" {
+		t.Error("Cookie value for user still exists after LogoutHandler: ", cookie.Value)
+	}
+
+	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
+	if authState.ReadSession("flash", w, request) != "testing" {
+		t.Error("Flash message was not a failed login message")
+	}
+	*/
+
+}
+
+func TestReadSession(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin")
+	request.Form.Add("password", "admin")
+	authState.LoginPostHandler(w, request)
+
+	// After a good login, copy Cookie into a new request
+	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+	// Create a new recorder to get a clean HeaderMap
+	w2 := httptest.NewRecorder()
+
+	user := authState.getUsernameFromCookie(request, w2)
+	if user != "admin" {
+		t.Error("getUsernameFromCookie did not properly return admin: ", user)
+	}
+
+	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
+	if authState.ReadSession("flash", w, request) != "testing" {
+		t.Error("Flash message was not a failed login message")
+	}
+	*/
+
+}
+
+func TestReadUserInfo(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	err = authState.NewAdmin("admin", "admin")
+	if err != nil {
+		t.Error("Error adding NewAdmin(): ", err)
+	}
+
+	admin := authState.GetUserInfo("admin")
+	if admin == nil {
+		t.Error("admin.User{} retrieved is nil.")
+	}
+	if !admin.IsAdmin() {
+		t.Error("admin.IsAdmin() did not return true.")
+	}
+	if admin.GetName() != "admin" {
+		t.Error("admin.GetName() did not return admin.")
+	}
+
+	err = authState.NewUser("user", "12345")
+	if err != nil {
+		t.Error("Error adding NewUser: ", err)
+	}
+
+	user := authState.GetUserInfo("user")
+	if user == nil {
+		t.Error("user.User{} retrieved is nil.")
+	}
+	if user.IsAdmin() {
+		t.Error("user.IsAdmin() did not return false.")
+	}
+	if user.GetName() != "user" {
+		t.Error("user.GetName() did not return user.")
+	}
+
+	userList, err := authState.Userlist()
+	if err != nil {
+		t.Error("Error retrieving Userlist(): ", err)
+	}
+	if userList == nil {
+		t.Error("Userlist() is nil.")
+	}
+
+}
+
+func TestRedirect(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("GET", "/index", nil)
+	Redirect(authState, w, request)
+
+	// After a good login, copy Cookie into a new request
+	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+	finalRequest := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
+	cookie, err := finalRequest.Cookie("redirect")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if cookie.Value == "" {
+		t.Error("Cookie value for redirect is blank even after Redirect(): ", cookie.Value)
+	}
+}
+
+func TestAuthMiddle1(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin")
+	request.Form.Add("password", "admin")
+	authState.LoginPostHandler(w, request)
+
+	// After a good login, copy Cookie into a new request
+	request2, err := http.NewRequest("GET", "/index", nil)
+	request2.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+	// Create a new recorder to get a clean HeaderMap
+	w2 := httptest.NewRecorder()
+
+	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("omg"))
+	})
+
+	handler := authState.UserEnvMiddle(authState.AuthMiddle(test))
+	handler.ServeHTTP(w2, request2)
+
+	if w2.Header().Get("Location") == "/login" {
+		t.Log(w2.HeaderMap)
+		t.Error("AuthMiddle redirected to /login even after successful login.")
+	}
+
+	/*
+		// After a good login, copy Cookie into a new request
+		request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+		finalRequest := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
+		cookie, err := finalRequest.Cookie("redirect")
+		if err != nil {
+			t.Error(err)
+		}
+
+		if cookie.Value == "" {
+			t.Error("Cookie value for redirect is blank even after Redirect(): ", cookie.Value)
+		}
+	*/
+}
+
+func TestAuthMiddle2(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("GET", "/index", nil)
+
+	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("omg"))
+	})
+	t.Log(w.HeaderMap)
+
+	handler := authState.UserEnvMiddle(authState.AuthMiddle(test))
+	handler.ServeHTTP(w, request)
+
+	if w.Header().Get("Location") != "/login" {
+		t.Log(w.HeaderMap)
+		t.Error("AuthMiddle did not redirect to /login")
+	}
+
+	/*
+		// After a good login, copy Cookie into a new request
+		request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+		finalRequest := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
+		cookie, err := finalRequest.Cookie("redirect")
+		if err != nil {
+			t.Error(err)
+		}
+
+		if cookie.Value == "" {
+			t.Error("Cookie value for redirect is blank even after Redirect(): ", cookie.Value)
+		}
+	*/
+}
+
+func TestAuthAdminMiddle1(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin")
+	request.Form.Add("password", "admin")
+	authState.LoginPostHandler(w, request)
+
+	// After a good login, copy Cookie into a new request
+	request2, err := http.NewRequest("GET", "/index", nil)
+	request2.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+	// Create a new recorder to get a clean HeaderMap
+	w2 := httptest.NewRecorder()
+
+	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("omg"))
+	})
+
+	handler := authState.UserEnvMiddle(authState.AuthAdminMiddle(test))
+	handler.ServeHTTP(w2, request2)
+
+	if w2.Header().Get("Location") == "/login" {
+		t.Log(w2.HeaderMap)
+		t.Error("AuthAdminMiddle redirected to /login even after successful login.")
+	}
+
+	/*
+		// After a good login, copy Cookie into a new request
+		request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+		finalRequest := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
+		cookie, err := finalRequest.Cookie("redirect")
+		if err != nil {
+			t.Error(err)
+		}
+
+		if cookie.Value == "" {
+			t.Error("Cookie value for redirect is blank even after Redirect(): ", cookie.Value)
+		}
+	*/
+}
+
+func TestAuthAdminMiddle2(t *testing.T) {
+
+	tmpdb := tempfile()
+	authState, err := NewAuthState(tmpdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpdb)
+
+	authState.NewUser("user", "12345")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	request.Form = url.Values{}
+	request.Form.Add("username", "user")
+	request.Form.Add("password", "12345")
+	authState.LoginPostHandler(w, request)
+
+	// After a good login, copy Cookie into a new request
+	request2, err := http.NewRequest("GET", "/index", nil)
+	request2.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+	// Create a new recorder to get a clean HeaderMap
+	w2 := httptest.NewRecorder()
+
+	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("omg"))
+	})
+
+	handler := authState.UserEnvMiddle(authState.AuthAdminMiddle(test))
+	handler.ServeHTTP(w2, request2)
+
+	if w2.Header().Get("Location") != "/" {
+		t.Log(w2.HeaderMap)
+		t.Error("AuthAdminMiddle did not redirect to / when user tried to access protected page.")
+	}
+
+	/*
+		// After a good login, copy Cookie into a new request
+		request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
+		finalRequest := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
+		cookie, err := finalRequest.Cookie("redirect")
+		if err != nil {
+			t.Error(err)
+		}
+
+		if cookie.Value == "" {
+			t.Error("Cookie value for redirect is blank even after Redirect(): ", cookie.Value)
+		}
+	*/
+}
