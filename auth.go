@@ -52,8 +52,12 @@ import (
 type key int
 
 const (
-	UserKey             key = 1
-	MsgKey              key = 2
+	// UserKey is used to store the *User in the context
+	UserKey key = 1
+	// MsgKey is used to store flash messages in the context
+	MsgKey key = 2
+	// ChkKey is used to store whether UserEnvMiddle has been hit in the context
+	ChkKey              key = 3
 	authInfoBucketName      = "AuthInfo"
 	hashKeyName             = "HashKey"
 	blockKeyName            = "BlockKey"
@@ -193,7 +197,7 @@ func newUserContext(c context.Context, u *User) context.Context {
 	return context.WithValue(c, UserKey, u)
 }
 
-func fromUserContext(c context.Context) (*User, bool) {
+func userFromContext(c context.Context) (*User, bool) {
 	u, ok := c.Value(UserKey).(*User)
 	return u, ok
 }
@@ -202,9 +206,18 @@ func newFlashContext(c context.Context, f *Flash) context.Context {
 	return context.WithValue(c, MsgKey, f)
 }
 
-func fromFlashContext(c context.Context) (*Flash, bool) {
+func flashFromContext(c context.Context) (*Flash, bool) {
 	f, ok := c.Value(MsgKey).(*Flash)
 	return f, ok
+}
+
+func newChkContext(c context.Context) context.Context {
+	return context.WithValue(c, ChkKey, true)
+}
+
+func chkFromContext(c context.Context) bool {
+	_, ok := c.Value(MsgKey).(bool)
+	return ok
 }
 
 // SetSession Takes a key, and a value to store inside a cookie
@@ -313,12 +326,15 @@ func IsLoggedIn(c context.Context) bool {
 }
 
 func GetUserState(c context.Context) *User {
-	userC, ok := fromUserContext(c)
+	userC, ok := userFromContext(c)
 	if ok {
 		return userC
 	}
 	if !ok {
 		debugln("No UserState in context.")
+		if !chkFromContext(c) {
+			log.Println("ERR: UserEnvMiddle is not being used. This is required for most functions to work!")
+		}
 	}
 	return nil
 }
@@ -327,7 +343,7 @@ func GetUserState(c context.Context) *User {
 func GetFlash(c context.Context) string {
 	//defer timeTrack(time.Now(), "GetUsername")
 	var flash string
-	t, ok := fromFlashContext(c)
+	t, ok := flashFromContext(c)
 	if !ok {
 		flash = ""
 	}
@@ -685,6 +701,9 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		message := state.getFlashFromCookie(r, w)
 
 		newc := r.Context()
+
+		// Add a little flag to tell whether this middleware has been hit
+		newc = newChkContext(newc)
 
 		if username != "" {
 			u := state.GetUserInfo(username)
