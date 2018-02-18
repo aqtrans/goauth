@@ -333,10 +333,8 @@ func TestReadSession(t *testing.T) {
 
 	// After a good login, copy Cookie into a new request
 	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
-	// Create a new recorder to get a clean HeaderMap
-	w2 := httptest.NewRecorder()
 
-	user := authState.getUsernameFromCookie(request, w2)
+	user := authState.getUsernameFromCookie(request, w)
 	if user != "admin" {
 		t.Error("getUsernameFromCookie did not properly return admin: ", user)
 	}
