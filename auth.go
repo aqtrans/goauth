@@ -267,6 +267,7 @@ func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter
 	return state.readSession("user", w, r)
 }
 
+/*
 func (state *State) getRedirectFromCookie(r *http.Request, w http.ResponseWriter) (redirURL string) {
 	redirURL = state.readSession("redirect", w, r)
 	if redirURL != "" {
@@ -274,6 +275,7 @@ func (state *State) getRedirectFromCookie(r *http.Request, w http.ResponseWriter
 	}
 	return redirURL
 }
+*/
 
 func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
 	message = state.readSession("flash", w, r)
@@ -760,6 +762,8 @@ func (state *State) dbInit() error {
 	return err
 }
 
+/* THIS HANDLER STUFF SHOULD ALL BE TAKEN CARE OF IN THE APPS; LEAVING FOR EXAMPLES:
+
 //UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
 func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
@@ -872,9 +876,11 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		// Give an error message.
 	}
 }
+*/
 
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
 // Comparing values with those in BoltDB, and if it passes, stores the verified username in the cookie
+// Note: As opposed to the other Handlers above, now commented out, this one deals with the redirects, so worth handling in the library.
 func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
