@@ -21,8 +21,9 @@ install-go:
 build-my-project:
   stage: build
   script:
-    - go get -u github.com/kardianos/govendor
-    - govendor sync
+    - curl -o dep -sL https://github.com/golang/dep/releases/download/v0.4.1/dep-linux-amd64
+    - chmod +x dep
+    - ./dep ensure
     - go get -d
     - go build
 
