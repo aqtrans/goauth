@@ -1,32 +1,19 @@
 package auth
 
-// 03/12/2017 - Massive revamp, using a 'state' instead of variables
-//    - Based on https://github.com/xyproto/permissionbolt/
-// **Currently using plain "context" package included in Go 1.7, so not backwards compatible**
+/*
+This package handles basic user authentication. It's design is based on https://github.com/xyproto/permissionbolt/,
+initializing a 'state' that is passed around to hold the boltDB connection and secureCookie instance.
 
-//Auth functions
-// Currently handles the following:
-//  User Auth:
-//   - User sign-up, stored in a Boltdb named auth.db
-//   - User authentication against Boltdb
-//       - Cookie-powered
-//       - With go1.7/context to help pass around the user info
-//   - AdminUser specified is made an Admin, so only one admin
-//   - Boltdb powered, using a Users buckets
-//   - Success/failure is delivered via a redirect and a flash message
+All cookie values (flash messages and usernames) are encrypted using gorilla/securecookie,
+and the HashKey and BlockKey are generated randomly and then are permanent per-db.
 
-// All cookies, flash messages and user info, are encrypted using gorilla/securecookie,
-//   and the HashKey and BlockKey are generated randomly and then are permanent per-db.
+The UserEnvMiddle middleware is required in order for the cookie info to be read into a context object.
+This ensures the cookie is not repeatedly read every time the user info is needed.
 
-// Context is used heavily. UserEnvMiddle tosses the flash/user info from cookies into context,
-//   and also checks that the specified user from the cookie exists.
-
-/* Example for using auth.State in an app:
+Example for using auth.State in an app:
 In main()
        // Bring up authState
-       var err error
-       authState, err = auth.NewAuthState("./data/auth.db")
-       check(err)
+       authState, _ = auth.NewAuthState("./data/auth.db")
 Use authstate methods and handlers
 */
 
