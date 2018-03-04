@@ -32,23 +32,11 @@ func tempfile() string {
 
 func TestBolt(t *testing.T) {
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
-	/*
-		var db *bolt.DB
-		db, err = authState.getDB()
-		if err != nil {
-			log.Println(err)
-		}
-		authState.BoltDB.authdb = db
-		authState.BoltDB.path = tmpdb
-		defer authState.releaseDB()
-	*/
+	authState := NewAuthState(tmpdb)
+
 	defer os.Remove(tmpdb)
 
-	_, err = authState.Userlist()
+	_, err := authState.Userlist()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,10 +142,7 @@ func TestContext(t *testing.T) {
 func TestCookies(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	w := httptest.NewRecorder()
@@ -175,15 +160,15 @@ func TestCookies(t *testing.T) {
 func TestFailedLogin(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	// Attempt a bad login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Form = url.Values{}
 	request.Form.Add("username", "admin1")
 	request.Form.Add("password", "admin1")
@@ -208,10 +193,7 @@ func TestFailedLogin(t *testing.T) {
 func TestSuccessfulLogin(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -219,6 +201,9 @@ func TestSuccessfulLogin(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Form = url.Values{}
 	request.Form.Add("username", "admin")
 	request.Form.Add("password", "admin")
@@ -241,26 +226,13 @@ func TestSuccessfulLogin(t *testing.T) {
 
 }
 
-func TestFails(t *testing.T) {
-	authState, err := NewAuthState("")
-	if err == nil {
-		t.Fatal(err)
-	}
-	if authState != nil {
-		t.Error("authState is not nil when fed an empty authdb location")
-	}
-}
-
 func TestInvalidRole(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
-	err = authState.newUser("admin", "admin", "omg")
+	err := authState.newUser("admin", "admin", "omg")
 	if err == nil {
 		t.Error("Role 'omg' was considered valid to state.newUser()!")
 	}
@@ -269,10 +241,7 @@ func TestInvalidRole(t *testing.T) {
 func TestClearSession(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -315,10 +284,7 @@ func TestClearSession(t *testing.T) {
 func TestReadSession(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -326,6 +292,9 @@ func TestReadSession(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Form = url.Values{}
 	request.Form.Add("username", "admin")
 	request.Form.Add("password", "admin")
@@ -350,13 +319,10 @@ func TestReadSession(t *testing.T) {
 func TestReadUserInfo(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
-	err = authState.NewAdmin("admin", "admin")
+	err := authState.NewAdmin("admin", "admin")
 	if err != nil {
 		t.Error("Error adding NewAdmin(): ", err)
 	}
@@ -401,10 +367,7 @@ func TestReadUserInfo(t *testing.T) {
 func TestRedirect(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -431,10 +394,7 @@ func TestRedirect(t *testing.T) {
 func TestAuthMiddle1(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -442,6 +402,9 @@ func TestAuthMiddle1(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Form = url.Values{}
 	request.Form.Add("username", "admin")
 	request.Form.Add("password", "admin")
@@ -484,10 +447,7 @@ func TestAuthMiddle1(t *testing.T) {
 func TestAuthMiddle2(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -495,6 +455,9 @@ func TestAuthMiddle2(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("GET", "/index", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("omg"))
@@ -528,10 +491,7 @@ func TestAuthMiddle2(t *testing.T) {
 func TestAuthAdminMiddle1(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -539,6 +499,9 @@ func TestAuthAdminMiddle1(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Form = url.Values{}
 	request.Form.Add("username", "admin")
 	request.Form.Add("password", "admin")
@@ -581,10 +544,7 @@ func TestAuthAdminMiddle1(t *testing.T) {
 func TestAuthAdminMiddle2(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState, err := NewAuthState(tmpdb)
-	if err != nil {
-		t.Fatal(err)
-	}
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewUser("user", "12345")
@@ -592,6 +552,9 @@ func TestAuthAdminMiddle2(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request.Form = url.Values{}
 	request.Form.Add("username", "user")
 	request.Form.Add("password", "12345")
@@ -599,6 +562,9 @@ func TestAuthAdminMiddle2(t *testing.T) {
 
 	// After a good login, copy Cookie into a new request
 	request2, err := http.NewRequest("GET", "/index", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	request2.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
 	// Create a new recorder to get a clean HeaderMap
 	w2 := httptest.NewRecorder()

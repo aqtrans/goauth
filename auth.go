@@ -129,32 +129,46 @@ func (state *State) releaseDB() {
 	}
 }
 
+func (db *DB) getDB() *bolt.DB {
+	//var authDB *bolt.DB
+	//log.Println(state.BoltDB.path)
+	var err error
+	db.authdb, err = bolt.Open(db.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		check(err)
+		log.Fatalln(err)
+		return nil
+	}
+	return db.authdb
+}
+
+func (db *DB) releaseDB() {
+	err := db.authdb.Close()
+	if err != nil {
+		check(err)
+		log.Fatalln(err)
+	}
+}
+
 // NewAuthState creates a new AuthState, storing the boltDB connection and cookie info
-func NewAuthState(path string) (*State, error) {
+func NewAuthState(path string) *State {
 	var db *bolt.DB
 
 	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
 // NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState
-func NewAuthStateWithDB(db *DB, path string) (*State, error) {
+func NewAuthStateWithDB(db *DB, path string) *State {
 	if path == "" {
-		return nil, errors.New("NewAuthStateWithDB: path is blank")
-	}
-	state := new(State)
-	state.BoltDB = db
-	state.BoltDB.path = path
-
-	err := state.dbInit()
-	if err != nil {
-		check(err)
-		return nil, err
+		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
 
-	hash, block := state.getAuthInfo()
-	state.cookie = securecookie.New(hash, block)
+	db.dbInit()
 
-	return state, nil
+	return &State{
+		BoltDB: db,
+		cookie: securecookie.New(db.getAuthInfo()),
+	}
 }
 
 // RandBytes generates a random amount of bytes given a specified length
@@ -464,11 +478,11 @@ func (state *State) GetUserInfo(username string) *User {
 
 }
 
-func (state *State) getAuthInfo() (hashkey, blockkey []byte) {
-	db := state.getDB()
-	defer state.releaseDB()
+func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
+	boltDB := db.getDB()
+	defer db.releaseDB()
 
-	err := db.View(func(tx *bolt.Tx) error {
+	err := boltDB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(authInfoBucketName))
 		v1 := b.Get([]byte(hashKeyName))
 		v2 := b.Get([]byte(blockKeyName))
@@ -721,11 +735,11 @@ func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 }
 */
 
-func (state *State) dbInit() error {
-	db := state.getDB()
-	defer state.releaseDB()
+func (db *DB) dbInit() {
+	boltDB := db.getDB()
+	defer db.releaseDB()
 
-	err := db.Update(func(tx *bolt.Tx) error {
+	err := boltDB.Update(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists([]byte(userInfoBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
@@ -764,7 +778,9 @@ func (state *State) dbInit() error {
 
 		return nil
 	})
-	return err
+	if err != nil {
+		log.Fatalln("Error in dbInit():", err)
+	}
 }
 
 /* THIS HANDLER STUFF SHOULD ALL BE TAKEN CARE OF IN THE APPS; LEAVING FOR EXAMPLES:
