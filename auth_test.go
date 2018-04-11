@@ -36,7 +36,7 @@ func TestBolt(t *testing.T) {
 
 	defer os.Remove(tmpdb)
 
-	_, err := authState.Userlist()
+	_, err := authState.Backend.Userlist()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,16 +45,16 @@ func TestBolt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !authState.DoesUserExist("adminTest") {
+	if !authState.Backend.DoesUserExist("adminTest") {
 		t.Fatal("ERR: adminTest user does not exist in authState!")
 	}
-	if !authState.BoltAuth("adminTest", "test") {
+	if !authState.Backend.Auth("adminTest", "test") {
 		t.Fatal("ERR: cannot login for some reason!")
 	}
-	if authState.BoltAuth("adminTest2", "test") {
+	if authState.Backend.Auth("adminTest2", "test") {
 		t.Fatal("ERR: non-existent user can login for some reason!")
 	}
-	if authState.BoltAuth("adminTest", "test2") {
+	if authState.Backend.Auth("adminTest", "test2") {
 		t.Fatal("ERR: user can login with bad password for some reason!")
 	}
 
@@ -62,24 +62,24 @@ func TestBolt(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	err = authState.UpdatePass("adminTest", pass2)
+	err = authState.Backend.UpdatePass("adminTest", pass2)
 	if err != nil {
 		t.Error(err)
 	}
-	if !authState.BoltAuth("adminTest", "test2") {
+	if !authState.Backend.Auth("adminTest", "test2") {
 		t.Fatal("ERR: cannot login after changing password for some reason!")
 	}
 
-	err = authState.UpdatePass("adminTest2", pass2)
+	err = authState.Backend.UpdatePass("adminTest2", pass2)
 	if err == nil {
 		t.Error("Able to update password for non-existent user")
 	}
 
-	err = authState.DeleteUser("adminTest")
+	err = authState.Backend.DeleteUser("adminTest")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authState.DoesUserExist("adminTest") {
+	if authState.Backend.DoesUserExist("adminTest") {
 		t.Fatal("ERR: adminTest user exists after deleting!")
 	}
 }
@@ -232,7 +232,7 @@ func TestInvalidRole(t *testing.T) {
 	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
-	err := authState.newUser("admin", "admin", "omg")
+	err := authState.Backend.newUser("admin", "admin", "omg")
 	if err == nil {
 		t.Error("Role 'omg' was considered valid to state.newUser()!")
 	}
@@ -327,7 +327,7 @@ func TestReadUserInfo(t *testing.T) {
 		t.Error("Error adding NewAdmin(): ", err)
 	}
 
-	admin := authState.GetUserInfo("admin")
+	admin := authState.Backend.GetUserInfo("admin")
 	if admin == nil {
 		t.Error("admin.User{} retrieved is nil.")
 	}
@@ -343,7 +343,7 @@ func TestReadUserInfo(t *testing.T) {
 		t.Error("Error adding NewUser: ", err)
 	}
 
-	user := authState.GetUserInfo("user")
+	user := authState.Backend.GetUserInfo("user")
 	if user == nil {
 		t.Error("user.User{} retrieved is nil.")
 	}
@@ -354,7 +354,7 @@ func TestReadUserInfo(t *testing.T) {
 		t.Error("user.GetName() did not return user.")
 	}
 
-	userList, err := authState.Userlist()
+	userList, err := authState.Backend.Userlist()
 	if err != nil {
 		t.Error("Error retrieving Userlist(): ", err)
 	}
