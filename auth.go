@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pelletier/go-toml"
 	"log"
 	"net/http"
 	"os"
@@ -63,14 +64,29 @@ var (
 
 // State holds all required info to get authentication working in the app
 type State struct {
-	BoltDB *DB
-	cookie *securecookie.SecureCookie
+	Backend authBackend
+	cookie  *securecookie.SecureCookie
+}
+
+type authBackend interface {
+	Auth(username, password string) bool
+	DoesUserExist(username string) bool
+	GetUserInfo(username string) *User
+	getAuthInfo() (hashkey, blockkey []byte)
+	newUser(username, password, role string) error
+	Userlist() ([]string, error)
+	DeleteUser(username string) error
+	UpdatePass(username string, hash []byte) error
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
 type DB struct {
 	authdb *bolt.DB
 	path   string
+}
+
+type TOML struct {
+	path string
 }
 
 type authInfo struct {
@@ -108,6 +124,7 @@ func check(err error) {
 	}
 }
 
+/*
 func (state *State) getDB() *bolt.DB {
 	var db *bolt.DB
 	//log.Println(state.BoltDB.path)
@@ -128,6 +145,7 @@ func (state *State) releaseDB() {
 		log.Fatalln(err)
 	}
 }
+*/
 
 func (db *DB) getDB() *bolt.DB {
 	//var authDB *bolt.DB
@@ -166,8 +184,8 @@ func NewAuthStateWithDB(db *DB, path string) *State {
 	db.dbInit()
 
 	return &State{
-		BoltDB: db,
-		cookie: securecookie.New(db.getAuthInfo()),
+		Backend: db,
+		cookie:  securecookie.New(db.getAuthInfo()),
 	}
 }
 
@@ -375,14 +393,30 @@ func (user *User) GetName() string {
 	return ""
 }
 
-func (state *State) BoltAuth(username, password string) bool {
+func (t *TOML) getTree() *toml.Tree {
+	tree, err := toml.LoadFile(t.path)
+	if err != nil {
+		log.Fatalln("Error loading toml:", err)
+	}
+	return tree
+}
 
-	db := state.getDB()
-	defer state.releaseDB()
+// TODO: Actually get this working!
+func (t *TOML) Auth(username, password string) bool {
+	// Try and grab [username]
+	tree := t.getTree().Get("user").(*toml.Tree)
+	log.Println(tree.Keys())
+	return false
+}
+
+func (db *DB) Auth(username, password string) bool {
+
+	boltdb := db.getDB()
+	defer db.releaseDB()
 
 	var user *User
 	// Grab given user's password from Bolt
-	err := db.View(func(tx *bolt.Tx) error {
+	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
 		v := b.Get([]byte(username))
 		if v == nil {
@@ -413,11 +447,11 @@ func (state *State) BoltAuth(username, password string) bool {
 }
 
 // Check if user actually exists
-func (state *State) DoesUserExist(username string) bool {
-	db := state.getDB()
-	defer state.releaseDB()
+func (db *DB) DoesUserExist(username string) bool {
+	boltdb := db.getDB()
+	defer db.releaseDB()
 
-	err := db.View(func(tx *bolt.Tx) error {
+	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
 		v := b.Get([]byte(username))
 		if v == nil {
@@ -436,12 +470,12 @@ func (state *State) DoesUserExist(username string) bool {
 }
 
 // Get a *User from the bucket
-func (state *State) GetUserInfo(username string) *User {
+func (db *DB) GetUserInfo(username string) *User {
 	var user *User
-	db := state.getDB()
-	defer state.releaseDB()
+	boltdb := db.getDB()
+	defer db.releaseDB()
 
-	err := db.View(func(tx *bolt.Tx) error {
+	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
 		v := b.Get([]byte(username))
 		if v == nil {
@@ -506,17 +540,17 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 
 // NewUser creates a new user with a given plaintext username and password
 func (state *State) NewUser(username, password string) error {
-	return state.newUser(username, password, roleUser)
+	return state.Backend.newUser(username, password, roleUser)
 }
 
 // NewAdmin creates a new admin with a given plaintext username and password
 func (state *State) NewAdmin(username, password string) error {
-	return state.newUser(username, password, roleAdmin)
+	return state.Backend.newUser(username, password, roleAdmin)
 }
 
 // newUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
-func (state *State) newUser(username, password, role string) error {
+func (db *DB) newUser(username, password, role string) error {
 
 	// Check that the given role is valid before even opening the DB
 	switch role {
@@ -545,10 +579,10 @@ func (state *State) newUser(username, password, role string) error {
 		return err
 	}
 
-	db := state.getDB()
-	defer state.releaseDB()
+	boltdb := db.getDB()
+	defer db.releaseDB()
 	//var vb []byte
-	adderr := db.Update(func(tx *bolt.Tx) error {
+	adderr := boltdb.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte("Users"))
 
 		userbucketUser := userbucket.Get([]byte(username))
@@ -573,12 +607,12 @@ func (state *State) newUser(username, password, role string) error {
 	return nil
 }
 
-func (state *State) Userlist() ([]string, error) {
-	db := state.getDB()
-	defer state.releaseDB()
+func (db *DB) Userlist() ([]string, error) {
+	boltdb := db.getDB()
+	defer db.releaseDB()
 
 	var userList []string
-	err := db.View(func(tx *bolt.Tx) error {
+	err := boltdb.View(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte(userInfoBucketName))
 		err := userbucket.ForEach(func(key, value []byte) error {
 			//fmt.Printf("A %s is %s.\n", key, value)
@@ -594,11 +628,11 @@ func (state *State) Userlist() ([]string, error) {
 	return userList, err
 }
 
-func (state *State) DeleteUser(username string) error {
-	db := state.getDB()
-	defer state.releaseDB()
+func (db *DB) DeleteUser(username string) error {
+	boltdb := db.getDB()
+	defer db.releaseDB()
 
-	err := db.Update(func(tx *bolt.Tx) error {
+	err := boltdb.Update(func(tx *bolt.Tx) error {
 		log.Println(username + " has been deleted")
 		return tx.Bucket([]byte(userInfoBucketName)).Delete([]byte(username))
 	})
@@ -608,12 +642,12 @@ func (state *State) DeleteUser(username string) error {
 	return err
 }
 
-func (state *State) UpdatePass(username string, hash []byte) error {
-	db := state.getDB()
-	defer state.releaseDB()
+func (db *DB) UpdatePass(username string, hash []byte) error {
+	boltdb := db.getDB()
+	defer db.releaseDB()
 
 	// Update password only if user exists
-	err := db.Update(func(tx *bolt.Tx) error {
+	err := boltdb.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte(userInfoBucketName))
 		userbucketUser := userbucket.Get([]byte(username))
 
@@ -706,7 +740,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		//newc = newChkContext(newc)
 
 		if username != "" {
-			u := state.GetUserInfo(username)
+			u := state.Backend.GetUserInfo(username)
 			newc = newUserContext(newc, u)
 		}
 
@@ -911,7 +945,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		password := template.HTMLEscapeString(r.FormValue("password"))
 
 		// Login authentication
-		if state.BoltAuth(username, password) {
+		if state.Backend.Auth(username, password) {
 			state.setSession("user", username, w)
 			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
