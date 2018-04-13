@@ -401,11 +401,42 @@ func (t *TOML) getTree() *toml.Tree {
 	return tree
 }
 
+func (t *TOML) saveTree(tree *toml.Tree) {
+	tomlFile, err := os.Create(t.path)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	_, err = tree.WriteTo(tomlFile)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Println(tree.String)
+	log.Println(t.path, "successfully saved.")
+}
+
 // TODO: Actually get this working!
 func (t *TOML) Auth(username, password string) bool {
 	// Try and grab [username]
-	tree := t.getTree().Get("user").(*toml.Tree)
-	log.Println(tree.Keys())
+	tree := t.getTree().Get(username).(*toml.Tree)
+	if !tree.Has("password") && password != "" {
+		log.Println(username, "does not have a password set. Setting it now...")
+
+		// Hash the password just given
+		hash, err := HashPassword([]byte(password))
+		if err != nil {
+			// couldn't hash password for some reason
+			log.Fatalln(err)
+		}
+
+		tree.Set("password", hash)
+
+		// Set role to user if one was not given
+		if !tree.Has("role") {
+			tree.Set("role", roleUser)
+		}
+		t.saveTree(tree)
+
+	}
 	return false
 }
 
