@@ -32,7 +32,7 @@ func tempfile() string {
 
 func TestBolt(t *testing.T) {
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 
 	defer os.Remove(tmpdb)
 
@@ -142,7 +142,7 @@ func TestContext(t *testing.T) {
 func TestCookies(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	w := httptest.NewRecorder()
@@ -160,7 +160,7 @@ func TestCookies(t *testing.T) {
 func TestFailedLogin(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	// Attempt a bad login
@@ -193,7 +193,7 @@ func TestFailedLogin(t *testing.T) {
 func TestSuccessfulLogin(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -229,7 +229,7 @@ func TestSuccessfulLogin(t *testing.T) {
 func TestInvalidRole(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	err := authState.Backend.newUser("admin", "admin", "omg")
@@ -241,7 +241,7 @@ func TestInvalidRole(t *testing.T) {
 func TestClearSession(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -284,7 +284,7 @@ func TestClearSession(t *testing.T) {
 func TestReadSession(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -319,7 +319,7 @@ func TestReadSession(t *testing.T) {
 func TestReadUserInfo(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	err := authState.NewAdmin("admin", "admin")
@@ -367,7 +367,7 @@ func TestReadUserInfo(t *testing.T) {
 func TestRedirect(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -394,7 +394,7 @@ func TestRedirect(t *testing.T) {
 func TestAuthMiddle1(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -447,7 +447,7 @@ func TestAuthMiddle1(t *testing.T) {
 func TestAuthMiddle2(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -491,7 +491,7 @@ func TestAuthMiddle2(t *testing.T) {
 func TestAuthAdminMiddle1(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewAdmin("admin", "admin")
@@ -544,7 +544,7 @@ func TestAuthAdminMiddle1(t *testing.T) {
 func TestAuthAdminMiddle2(t *testing.T) {
 
 	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
+	authState := NewBoltAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
 	authState.NewUser("user", "12345")

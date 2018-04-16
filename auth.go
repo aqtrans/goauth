@@ -24,13 +24,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pelletier/go-toml"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
 	"text/template"
 	"time"
+
+	"github.com/pelletier/go-toml"
 
 	"github.com/boltdb/bolt"
 	"github.com/gorilla/securecookie"
@@ -168,15 +169,43 @@ func (db *DB) releaseDB() {
 	}
 }
 
-// NewAuthState creates a new AuthState, storing the boltDB connection and cookie info
-func NewAuthState(path string) *State {
+// NewBoltAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
+func NewBoltAuthState(path string) *State {
 	var db *bolt.DB
 
-	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path)
+	return NewBoltAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
-// NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState
-func NewAuthStateWithDB(db *DB, path string) *State {
+func NewTOMLAuthState(path string) *State {
+	tomlFile := &TOML{
+		path: path,
+	}
+
+	tree, err := toml.LoadFile(path)
+	if err != nil {
+		log.Fatalln("Error loading toml:", err)
+	}
+
+	if !tree.Has("AuthInfo") {
+		log.Println(path, "does not contain AuthInfo. Generating them...")
+		hashKey := RandString(64)
+		tree.SetPath([]string{"AuthInfo", "HashKey"}, hashKey)
+		blockKey := RandString(32)
+		tree.SetPath([]string{"AuthInfo", "BlockKey"}, blockKey)
+		tomlFile.saveTree(tree)
+	}
+
+	omg1, omg2 := tomlFile.getAuthInfo()
+	log.Println(len(omg1), len(omg2))
+
+	return &State{
+		Backend: tomlFile,
+		cookie:  securecookie.New(tomlFile.getAuthInfo()),
+	}
+}
+
+// NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
+func NewBoltAuthStateWithDB(db *DB, path string) *State {
 	if path == "" {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
@@ -199,6 +228,15 @@ func RandBytes(n int) []byte {
 		return nil
 	}
 	return b
+}
+
+func RandString(n int) string {
+	const letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-"
+	bytes := RandBytes(n)
+	for i, b := range bytes {
+		bytes[i] = letters[b%byte(len(letters))]
+	}
+	return string(bytes)
 }
 
 // HashPassword generates a bcrypt hash of the password using work factor 14.
@@ -252,7 +290,7 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 		}
 		http.SetCookie(w, cookie)
 	} else {
-		debugln("Error encoding cookie " + key + " value")
+		debugln("Error encoding cookie "+key+" value", err)
 	}
 
 }
@@ -315,6 +353,14 @@ func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (
 		state.clearFlash(w)
 	}
 	return message
+}
+
+func (state *State) Userlist() ([]string, error) {
+	return state.Backend.Userlist()
+}
+
+func (state *State) GetUserInfo(username string) *User {
+	return state.Backend.GetUserInfo(username)
 }
 
 /*
@@ -398,7 +444,17 @@ func (t *TOML) getTree() *toml.Tree {
 	if err != nil {
 		log.Fatalln("Error loading toml:", err)
 	}
+
 	return tree
+}
+
+func (t *TOML) getUserTree(username string) *toml.Tree {
+	tree := t.getTree()
+	if tree.HasPath([]string{"users", username}) {
+		userTree := tree.GetPath([]string{"users", username}).(*toml.Tree)
+		return userTree
+	}
+	return nil
 }
 
 func (t *TOML) saveTree(tree *toml.Tree) {
@@ -410,15 +466,19 @@ func (t *TOML) saveTree(tree *toml.Tree) {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	log.Println(tree.String)
+	log.Println(tree.String())
 	log.Println(t.path, "successfully saved.")
 }
 
 // TODO: Actually get this working!
 func (t *TOML) Auth(username, password string) bool {
-	// Try and grab [username]
-	tree := t.getTree().Get(username).(*toml.Tree)
-	if !tree.Has("password") && password != "" {
+	tree := t.getTree()
+
+	// Using a small trick here to allow pre-registering a user, but not setting a plaintext password
+	// When a user without a password logs in, it sets the password to what was given
+	// TODO: Figure out a way to relay a flash message indicating their password was set
+	//   Since state is not passed here, unsure how to do this
+	if tree.HasPath([]string{"users", username}) && !tree.HasPath([]string{"users", username, "password"}) && password != "" {
 		log.Println(username, "does not have a password set. Setting it now...")
 
 		// Hash the password just given
@@ -428,16 +488,99 @@ func (t *TOML) Auth(username, password string) bool {
 			log.Fatalln(err)
 		}
 
-		tree.Set("password", hash)
+		tree.SetPath([]string{"users", username, "password"}, string(hash))
 
 		// Set role to user if one was not given
-		if !tree.Has("role") {
-			tree.Set("role", roleUser)
+		if !tree.HasPath([]string{"users", username, "role"}) {
+			tree.SetPath([]string{"users", username, "role"}, roleUser)
 		}
 		t.saveTree(tree)
-
+		return true
 	}
+
+	if tree.HasPath([]string{"users", username}) {
+		hashString := tree.GetPath([]string{"users", username, "password"}).(string)
+		bHash := []byte(hashString)
+		err := CheckPasswordHash(bHash, []byte(password))
+		if err != nil {
+			log.Println("Error verifying password:", err)
+			return false
+		}
+		return true
+	}
+
 	return false
+}
+
+func (t *TOML) DeleteUser(username string) error {
+	tree := t.getTree()
+	if tree.HasPath([]string{"users", username}) {
+		treeMap := tree.ToMap()
+		delete(treeMap, "users."+username)
+		newTree, err := toml.TreeFromMap(treeMap)
+		if err != nil {
+			return err
+		}
+		t.saveTree(newTree)
+	}
+	return nil
+}
+
+func (t *TOML) DoesUserExist(username string) bool {
+	return t.getTree().HasPath([]string{"users", username})
+}
+
+func (t *TOML) GetUserInfo(username string) *User {
+	tree := t.getTree().GetPath([]string{"users", username}).(*toml.Tree)
+	user := &User{
+		Name:     username,
+		Password: []byte(tree.Get("password").(string)),
+		Role:     tree.Get("role").(string),
+	}
+	return user
+}
+
+func (t *TOML) UpdatePass(username string, hash []byte) error {
+	tree := t.getTree()
+	if tree.HasPath([]string{"users", username}) {
+		tree.SetPath([]string{"users", username, "password"}, hash)
+		t.saveTree(tree)
+	}
+	return nil
+}
+
+func (t *TOML) Userlist() ([]string, error) {
+	tree := t.getTree().Get("users").(*toml.Tree)
+	return tree.Keys(), nil
+
+}
+
+func (t *TOML) getAuthInfo() (hashkey, blockkey []byte) {
+	tree := t.getTree().Get("AuthInfo").(*toml.Tree)
+	hashkeyS := tree.Get("HashKey").(string)
+	blockkeyS := tree.Get("BlockKey").(string)
+	return []byte(hashkeyS), []byte(blockkeyS)
+}
+
+func (t *TOML) newUser(username, password, role string) error {
+	// Check that the given role is valid before even opening the DB
+	switch role {
+	case roleAdmin, roleUser:
+	default:
+		return errors.New("NewUser role is invalid: " + role)
+	}
+
+	hash, err := HashPassword([]byte(password))
+	if err != nil {
+		// couldn't hash password for some reason
+		check(err)
+		return err
+	}
+
+	tree := t.getTree().Get("users").(*toml.Tree)
+	tree.SetPath([]string{"users", username, "password"}, string(hash))
+	tree.SetPath([]string{"users", username, "role"}, role)
+	return nil
 }
 
 func (db *DB) Auth(username, password string) bool {
