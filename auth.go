@@ -24,11 +24,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
 	"text/template"
+	//"text/template"
 	"time"
 
 	"github.com/pelletier/go-toml"
@@ -299,6 +302,14 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 //   middleware, pushes the message into context and then template
 func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession("flash", msg, w)
+}
+
+func (state *State) SetState(msg string, w http.ResponseWriter) {
+	state.setSession("state", msg, w)
+}
+
+func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
+	return state.readSession("state", w, r)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -1144,4 +1155,27 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Give an error message.
 	}
+}
+
+type oAuthConf struct {
+	*oauth2.Config
+}
+
+func BuildOAuthConf() oAuthConf {
+	return oAuthConf{
+		&oauth2.Config{
+			ClientID:     "1095755855869-qk6in13jr4ckf604qp59511ossihkqle.apps.googleusercontent.com",
+			ClientSecret: "IFriZgF-yDdOsOAQ6W6gDFHD",
+			RedirectURL:  "http://127.0.0.1:3000/",
+			Scopes: []string{
+				"https://www.googleapis.com/auth/userinfo.email", // You have to select your own scope from here -> https://developers.google.com/identity/protocols/googlescopes#google_sign-in
+			},
+			Endpoint: google.Endpoint,
+		},
+	}
+
+}
+
+func (conf oAuthConf) getLoginURL(state string) string {
+	return conf.AuthCodeURL(state)
 }
