@@ -24,16 +24,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
 	"text/template"
+
+	"golang.org/x/oauth2"
 	//"text/template"
 	"time"
 
+	oidc "github.com/coreos/go-oidc"
 	"github.com/pelletier/go-toml"
 
 	"github.com/boltdb/bolt"
@@ -89,8 +90,23 @@ type DB struct {
 	path   string
 }
 
-type TOML struct {
-	path string
+type GoogleOIDC struct {
+	Cfg    oidcCfg
+	OIDC   oidcConnectors
+	cookie *securecookie.SecureCookie
+}
+
+type oidcCfg struct {
+	tomlPath     string
+	clientID     string
+	clientSecret string
+	redirectURL  string
+}
+
+type oidcConnectors struct {
+	Provider *oidc.Provider
+	Verifier *oidc.IDTokenVerifier
+	Cfg      *oauth2.Config
 }
 
 type authInfo struct {
@@ -179,9 +195,16 @@ func NewBoltAuthState(path string) *State {
 	return NewBoltAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
-func NewTOMLAuthState(path string) *State {
-	tomlFile := &TOML{
-		path: path,
+func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
+	oidcConfig := oidcCfg{
+		tomlPath:     path,
+		clientID:     id,
+		clientSecret: secret,
+		redirectURL:  redirectURL,
+	}
+
+	g := &GoogleOIDC{
+		Cfg: oidcConfig,
 	}
 
 	tree, err := toml.LoadFile(path)
@@ -195,16 +218,15 @@ func NewTOMLAuthState(path string) *State {
 		tree.SetPath([]string{"AuthInfo", "HashKey"}, hashKey)
 		blockKey := RandString(32)
 		tree.SetPath([]string{"AuthInfo", "BlockKey"}, blockKey)
-		tomlFile.saveTree(tree)
+		g.saveTOMLTree(tree)
 	}
 
-	omg1, omg2 := tomlFile.getAuthInfo()
+	omg1, omg2 := g.getAuthInfo()
 	log.Println(len(omg1), len(omg2))
 
-	return &State{
-		Backend: tomlFile,
-		cookie:  securecookie.New(tomlFile.getAuthInfo()),
-	}
+	g.cookie = securecookie.New(g.getAuthInfo())
+
+	return g
 }
 
 // NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
@@ -304,12 +326,53 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession("flash", msg, w)
 }
 
-func (state *State) SetState(msg string, w http.ResponseWriter) {
-	state.setSession("state", msg, w)
+func (g *GoogleOIDC) SetFlash(msg string, w http.ResponseWriter) {
+	g.setSession("flash", msg, w)
 }
 
-func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
-	return state.readSession("state", w, r)
+func (g *GoogleOIDC) SetState(msg string, w http.ResponseWriter) {
+	g.setSession("state", msg, w)
+}
+
+func (g *GoogleOIDC) ReadState(w http.ResponseWriter, r *http.Request) string {
+	return g.readSession("state", w, r)
+}
+
+func (g *GoogleOIDC) setSession(key, val string, w http.ResponseWriter) {
+
+	if encoded, err := g.cookie.Encode(key, val); err == nil {
+		cookie := &http.Cookie{
+			Name:     key,
+			Value:    encoded,
+			Path:     "/",
+			HttpOnly: true,
+		}
+		http.SetCookie(w, cookie)
+	} else {
+		debugln("Error encoding cookie "+key+" value", err)
+	}
+
+}
+
+func (g *GoogleOIDC) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
+	if cookie, err := r.Cookie(key); err == nil {
+		err := g.cookie.Decode(key, cookie.Value, &value)
+		if err != nil {
+			debugln("Error decoding cookie value for", key, err)
+			g.setSession(key, "", w)
+		}
+	} else if err != http.ErrNoCookie {
+		debugln("Error reading cookie", key, err)
+	}
+	return value
+}
+
+func (g *GoogleOIDC) SetToken(msg string, w http.ResponseWriter) {
+	g.setSession("token", msg, w)
+}
+
+func (g *GoogleOIDC) ReadToken(w http.ResponseWriter, r *http.Request) string {
+	return g.readSession("token", w, r)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -450,8 +513,8 @@ func (user *User) GetName() string {
 	return ""
 }
 
-func (t *TOML) getTree() *toml.Tree {
-	tree, err := toml.LoadFile(t.path)
+func (g *GoogleOIDC) getTOMLTree() *toml.Tree {
+	tree, err := toml.LoadFile(g.Cfg.tomlPath)
 	if err != nil {
 		log.Fatalln("Error loading toml:", err)
 	}
@@ -459,8 +522,8 @@ func (t *TOML) getTree() *toml.Tree {
 	return tree
 }
 
-func (t *TOML) getUserTree(username string) *toml.Tree {
-	tree := t.getTree()
+func (g *GoogleOIDC) getUserTree(username string) *toml.Tree {
+	tree := g.getTOMLTree()
 	if tree.HasPath([]string{"users", username}) {
 		userTree := tree.GetPath([]string{"users", username}).(*toml.Tree)
 		return userTree
@@ -468,8 +531,8 @@ func (t *TOML) getUserTree(username string) *toml.Tree {
 	return nil
 }
 
-func (t *TOML) saveTree(tree *toml.Tree) {
-	tomlFile, err := os.Create(t.path)
+func (g *GoogleOIDC) saveTOMLTree(tree *toml.Tree) {
+	tomlFile, err := os.Create(g.Cfg.tomlPath)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -478,19 +541,15 @@ func (t *TOML) saveTree(tree *toml.Tree) {
 		log.Fatalln(err)
 	}
 	log.Println(tree.String())
-	log.Println(t.path, "successfully saved.")
+	log.Println(g.Cfg.tomlPath, "successfully saved.")
 }
 
 // TODO: Actually get this working!
-func (t *TOML) Auth(username, password string) bool {
-	tree := t.getTree()
+func (g *GoogleOIDC) Auth(username, password string) bool {
+	tree := g.getTOMLTree()
 
-	// Using a small trick here to allow pre-registering a user, but not setting a plaintext password
-	// When a user without a password logs in, it sets the password to what was given
-	// TODO: Figure out a way to relay a flash message indicating their password was set
-	//   Since state is not passed here, unsure how to do this
-	if tree.HasPath([]string{"users", username}) && !tree.HasPath([]string{"users", username, "password"}) && password != "" {
-		log.Println(username, "does not have a password set. Setting it now...")
+	// Only allow logging in when email is defined in the TOML
+	if tree.HasPath([]string{"users", username}) {
 
 		// Hash the password just given
 		hash, err := HashPassword([]byte(password))
@@ -505,7 +564,7 @@ func (t *TOML) Auth(username, password string) bool {
 		if !tree.HasPath([]string{"users", username, "role"}) {
 			tree.SetPath([]string{"users", username, "role"}, roleUser)
 		}
-		t.saveTree(tree)
+		g.saveTOMLTree(tree)
 		return true
 	}
 
@@ -523,8 +582,8 @@ func (t *TOML) Auth(username, password string) bool {
 	return false
 }
 
-func (t *TOML) DeleteUser(username string) error {
-	tree := t.getTree()
+func (g *GoogleOIDC) DeleteUser(username string) error {
+	tree := g.getTOMLTree()
 	if tree.HasPath([]string{"users", username}) {
 		treeMap := tree.ToMap()
 		delete(treeMap, "users."+username)
@@ -532,17 +591,17 @@ func (t *TOML) DeleteUser(username string) error {
 		if err != nil {
 			return err
 		}
-		t.saveTree(newTree)
+		g.saveTOMLTree(newTree)
 	}
 	return nil
 }
 
-func (t *TOML) DoesUserExist(username string) bool {
-	return t.getTree().HasPath([]string{"users", username})
+func (t *GoogleOIDC) DoesUserExist(username string) bool {
+	return t.getTOMLTree().HasPath([]string{"users", username})
 }
 
-func (t *TOML) GetUserInfo(username string) *User {
-	tree := t.getTree().GetPath([]string{"users", username}).(*toml.Tree)
+func (t *GoogleOIDC) GetUserInfo(username string) *User {
+	tree := t.getTOMLTree().GetPath([]string{"users", username}).(*toml.Tree)
 	user := &User{
 		Name:     username,
 		Password: []byte(tree.Get("password").(string)),
@@ -551,29 +610,25 @@ func (t *TOML) GetUserInfo(username string) *User {
 	return user
 }
 
-func (t *TOML) UpdatePass(username string, hash []byte) error {
-	tree := t.getTree()
-	if tree.HasPath([]string{"users", username}) {
-		tree.SetPath([]string{"users", username, "password"}, hash)
-		t.saveTree(tree)
-	}
+func (t *GoogleOIDC) UpdatePass(username string, hash []byte) error {
+	// Nothing to do for passwords here
 	return nil
 }
 
-func (t *TOML) Userlist() ([]string, error) {
-	tree := t.getTree().Get("users").(*toml.Tree)
+func (t *GoogleOIDC) Userlist() ([]string, error) {
+	tree := t.getTOMLTree().Get("users").(*toml.Tree)
 	return tree.Keys(), nil
 
 }
 
-func (t *TOML) getAuthInfo() (hashkey, blockkey []byte) {
-	tree := t.getTree().Get("AuthInfo").(*toml.Tree)
+func (t *GoogleOIDC) getAuthInfo() (hashkey, blockkey []byte) {
+	tree := t.getTOMLTree().Get("AuthInfo").(*toml.Tree)
 	hashkeyS := tree.Get("HashKey").(string)
 	blockkeyS := tree.Get("BlockKey").(string)
 	return []byte(hashkeyS), []byte(blockkeyS)
 }
 
-func (t *TOML) newUser(username, password, role string) error {
+func (t *GoogleOIDC) newUser(username, password, role string) error {
 	// Check that the given role is valid before even opening the DB
 	switch role {
 	case roleAdmin, roleUser:
@@ -581,15 +636,7 @@ func (t *TOML) newUser(username, password, role string) error {
 		return errors.New("NewUser role is invalid: " + role)
 	}
 
-	hash, err := HashPassword([]byte(password))
-	if err != nil {
-		// couldn't hash password for some reason
-		check(err)
-		return err
-	}
-
-	tree := t.getTree().Get("users").(*toml.Tree)
-	tree.SetPath([]string{"users", username, "password"}, string(hash))
+	tree := t.getTOMLTree().Get("users").(*toml.Tree)
 	tree.SetPath([]string{"users", username, "role"}, role)
 	return nil
 }
@@ -1157,25 +1204,25 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type oAuthConf struct {
-	*oauth2.Config
-}
+func (g *GoogleOIDC) Init() {
+	provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
+	if err != nil {
+		log.Fatalln("Error setting up GoogleOIDC provider:", err)
+	}
 
-func BuildOAuthConf() oAuthConf {
-	return oAuthConf{
-		&oauth2.Config{
-			ClientID:     "1095755855869-qk6in13jr4ckf604qp59511ossihkqle.apps.googleusercontent.com",
-			ClientSecret: "IFriZgF-yDdOsOAQ6W6gDFHD",
-			RedirectURL:  "http://127.0.0.1:3000/",
-			Scopes: []string{
-				"https://www.googleapis.com/auth/userinfo.email", // You have to select your own scope from here -> https://developers.google.com/identity/protocols/googlescopes#google_sign-in
-			},
-			Endpoint: google.Endpoint,
+	g.OIDC = oidcConnectors{
+		Provider: provider,
+		Verifier: provider.Verifier(&oidc.Config{ClientID: g.Cfg.clientID}),
+		Cfg: &oauth2.Config{
+			ClientID:     g.Cfg.clientID,
+			ClientSecret: g.Cfg.clientSecret,
+			RedirectURL:  g.Cfg.redirectURL,
+			// Discovery returns the OAuth2 endpoints.
+			Endpoint: provider.Endpoint(),
+
+			// "openid" is a required scope for OpenID Connect flows.
+			Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
 		},
 	}
 
-}
-
-func (conf oAuthConf) getLoginURL(state string) string {
-	return conf.AuthCodeURL(state)
 }
