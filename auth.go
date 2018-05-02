@@ -596,16 +596,64 @@ func (g *GoogleOIDC) DeleteUser(username string) error {
 	return nil
 }
 
+// In this case, take the raw ID token, and verify it against the Google OIDC endpoint
 func (t *GoogleOIDC) DoesUserExist(username string) bool {
-	return t.getTOMLTree().HasPath([]string{"users", username})
+	// Might reuse this check below at some point, to check if a user has registered before or something?
+	//return t.getTOMLTree().HasPath([]string{"users", username})
+
+	// Parse and verify ID Token payload.
+	idToken, err := t.OIDC.Verifier.Verify(context.Background(), username)
+	if err != nil {
+		log.Println("Error verifying rawIDToken:", err)
+		return false
+	}
+
+	// Extract custom claims
+	var claims struct {
+		Email    string `json:"email"`
+		Verified bool   `json:"email_verified"`
+	}
+	if err == nil {
+		if err := idToken.Claims(&claims); err != nil {
+			log.Println("Error extracting claims:", err)
+			return false
+		}
+	}
+	return true
 }
 
 func (t *GoogleOIDC) GetUserInfo(username string) *User {
-	tree := t.getTOMLTree().GetPath([]string{"users", username}).(*toml.Tree)
+	// Parse and verify ID Token payload.
+	idToken, err := t.OIDC.Verifier.Verify(context.Background(), username)
+	if err != nil {
+		log.Println("Error verifying rawIDToken:", err)
+		return nil
+	}
+
+	// Extract custom claims
+	var claims struct {
+		Email    string `json:"email"`
+		Verified bool   `json:"email_verified"`
+	}
+	if err == nil {
+		if err := idToken.Claims(&claims); err != nil {
+			log.Println("Error extracting claims:", err)
+			return nil
+		}
+	}
+
+	var role string
+	if t.getTOMLTree().HasPath([]string{"users", username}) {
+		tree := t.getTOMLTree().GetPath([]string{"users", username}).(*toml.Tree)
+		role = tree.Get("role").(string)
+	}
+
+	if role == "" {
+		role = roleUser
+	}
 	user := &User{
-		Name:     username,
-		Password: []byte(tree.Get("password").(string)),
-		Role:     tree.Get("role").(string),
+		Name: claims.Email,
+		Role: role,
 	}
 	return user
 }

@@ -28,35 +28,17 @@ func main() {
 
 func handleMain(w http.ResponseWriter, r *http.Request) {
 	token := userstate.ReadToken(w, r)
-	// Parse and verify ID Token payload.
-	idToken, err := userstate.OIDC.Verifier.Verify(r.Context(), token)
-	if err != nil {
-		log.Println("Error verifying rawIDToken:", err)
-	}
-
-	// Extract custom claims
-	var claims struct {
-		Email    string `json:"email"`
-		Verified bool   `json:"email_verified"`
-	}
-	if err == nil {
-		if err := idToken.Claims(&claims); err != nil {
-			log.Println("Error extracting claims:", err)
-		}
-	}
-
-	if claims.Email != "" {
+	if userstate.DoesUserExist(token) {
 		fmt.Fprintf(w, `<html><body>
 			Welcome %v!
-			</body></html>`, claims.Email)
-		return
-	} else {
-		fmt.Fprintf(w, `<html><body>
-			<a href="/login">Log in with Google</a>
-			</body></html>`)
+			</body></html>`, userstate.GetUserInfo(token).Name)
 		return
 	}
 
+	fmt.Fprintf(w, `<html><body>
+			<a href="/login">Log in with Google</a>
+			</body></html>`)
+	return
 }
 
 func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
