@@ -8,11 +8,10 @@ import (
 	"jba.io/go/auth"
 )
 
-var userstate *auth.GoogleOIDC
+var userstate *auth.State
 
 func main() {
 	userstate = auth.NewOIDCAuthState("omg.toml", "1095755855869-qk6in13jr4ckf604qp59511ossihkqle.apps.googleusercontent.com", "IFriZgF-yDdOsOAQ6W6gDFHD", "http://127.0.0.1:3000/callback")
-	userstate.Init()
 
 	auth.Debug = true
 	http.HandleFunc("/", handleMain)
@@ -28,6 +27,7 @@ func main() {
 
 func handleMain(w http.ResponseWriter, r *http.Request) {
 	token := userstate.ReadToken(w, r)
+
 	if userstate.DoesUserExist(token) {
 		fmt.Fprintf(w, `<html><body>
 			Welcome %v!
@@ -45,7 +45,7 @@ func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	b := auth.RandString(8)
 	userstate.SetState(b, w)
 
-	url := userstate.OIDC.Cfg.AuthCodeURL(b)
+	url := userstate.Connectors.Cfg.AuthCodeURL(b)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
