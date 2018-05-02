@@ -69,8 +69,8 @@ var (
 
 // State holds all required info to get authentication working in the app
 type State struct {
-	Backend authBackend
-	cookie  *securecookie.SecureCookie
+	authBackend
+	cookie *securecookie.SecureCookie
 }
 
 type authBackend interface {
@@ -82,6 +82,9 @@ type authBackend interface {
 	Userlist() ([]string, error)
 	DeleteUser(username string) error
 	UpdatePass(username string, hash []byte) error
+	// These are very OIDC-specific
+	//Login(w http.ResponseWriter, r *http.Request)
+	//LoginCallback(w http.ResponseWriter, r *http.Request)
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -91,16 +94,8 @@ type DB struct {
 }
 
 type GoogleOIDC struct {
-	Cfg    oidcCfg
-	OIDC   oidcConnectors
-	cookie *securecookie.SecureCookie
-}
-
-type oidcCfg struct {
-	tomlPath     string
-	clientID     string
-	clientSecret string
-	redirectURL  string
+	tomlPath   string
+	Connectors oidcConnectors
 }
 
 type oidcConnectors struct {
@@ -195,20 +190,34 @@ func NewBoltAuthState(path string) *State {
 	return NewBoltAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
-func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
-	oidcConfig := oidcCfg{
-		tomlPath:     path,
-		clientID:     id,
-		clientSecret: secret,
-		redirectURL:  redirectURL,
+func NewOIDCAuthState(path, id, secret, redirectURL string) *State {
+
+	provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
+	if err != nil {
+		log.Fatalln("Error setting up GoogleOIDC provider:", err)
 	}
 
 	g := &GoogleOIDC{
-		Cfg: oidcConfig,
+		tomlPath: path,
+		Connectors: oidcConnectors{
+			Provider: provider,
+			Verifier: provider.Verifier(&oidc.Config{ClientID: id}),
+			Cfg: &oauth2.Config{
+				ClientID:     id,
+				ClientSecret: secret,
+				RedirectURL:  redirectURL,
+				// Discovery returns the OAuth2 endpoints.
+				Endpoint: provider.Endpoint(),
+
+				// "openid" is a required scope for OpenID Connect flows.
+				Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
+			},
+		},
 	}
 
+	// Load TOML if it exists:
 	tree, err := toml.LoadFile(path)
-	if err != nil {
+	if err != nil && err != os.ErrNotExist {
 		log.Fatalln("Error loading toml:", err)
 	}
 
@@ -224,9 +233,10 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
 	omg1, omg2 := g.getAuthInfo()
 	log.Println(len(omg1), len(omg2))
 
-	g.cookie = securecookie.New(g.getAuthInfo())
-
-	return g
+	return &State{
+		authBackend: g,
+		cookie:      securecookie.New(g.getAuthInfo()),
+	}
 }
 
 // NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
@@ -238,8 +248,8 @@ func NewBoltAuthStateWithDB(db *DB, path string) *State {
 	db.dbInit()
 
 	return &State{
-		Backend: db,
-		cookie:  securecookie.New(db.getAuthInfo()),
+		authBackend: db,
+		cookie:      securecookie.New(db.getAuthInfo()),
 	}
 }
 
@@ -326,53 +336,20 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession("flash", msg, w)
 }
 
-func (g *GoogleOIDC) SetFlash(msg string, w http.ResponseWriter) {
-	g.setSession("flash", msg, w)
+func (state *State) SetState(msg string, w http.ResponseWriter) {
+	state.setSession("state", msg, w)
 }
 
-func (g *GoogleOIDC) SetState(msg string, w http.ResponseWriter) {
-	g.setSession("state", msg, w)
+func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
+	return state.readSession("state", w, r)
 }
 
-func (g *GoogleOIDC) ReadState(w http.ResponseWriter, r *http.Request) string {
-	return g.readSession("state", w, r)
+func (state *State) SetToken(msg string, w http.ResponseWriter) {
+	state.setSession("token", msg, w)
 }
 
-func (g *GoogleOIDC) setSession(key, val string, w http.ResponseWriter) {
-
-	if encoded, err := g.cookie.Encode(key, val); err == nil {
-		cookie := &http.Cookie{
-			Name:     key,
-			Value:    encoded,
-			Path:     "/",
-			HttpOnly: true,
-		}
-		http.SetCookie(w, cookie)
-	} else {
-		debugln("Error encoding cookie "+key+" value", err)
-	}
-
-}
-
-func (g *GoogleOIDC) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
-	if cookie, err := r.Cookie(key); err == nil {
-		err := g.cookie.Decode(key, cookie.Value, &value)
-		if err != nil {
-			debugln("Error decoding cookie value for", key, err)
-			g.setSession(key, "", w)
-		}
-	} else if err != http.ErrNoCookie {
-		debugln("Error reading cookie", key, err)
-	}
-	return value
-}
-
-func (g *GoogleOIDC) SetToken(msg string, w http.ResponseWriter) {
-	g.setSession("token", msg, w)
-}
-
-func (g *GoogleOIDC) ReadToken(w http.ResponseWriter, r *http.Request) string {
-	return g.readSession("token", w, r)
+func (state *State) ReadToken(w http.ResponseWriter, r *http.Request) string {
+	return state.readSession("token", w, r)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -429,6 +406,7 @@ func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (
 	return message
 }
 
+/*
 func (state *State) Userlist() ([]string, error) {
 	return state.Backend.Userlist()
 }
@@ -436,6 +414,7 @@ func (state *State) Userlist() ([]string, error) {
 func (state *State) GetUserInfo(username string) *User {
 	return state.Backend.GetUserInfo(username)
 }
+*/
 
 /*
 // GetUsername retrieves username, and admin bool from context
@@ -514,7 +493,7 @@ func (user *User) GetName() string {
 }
 
 func (g *GoogleOIDC) getTOMLTree() *toml.Tree {
-	tree, err := toml.LoadFile(g.Cfg.tomlPath)
+	tree, err := toml.LoadFile(g.tomlPath)
 	if err != nil {
 		log.Fatalln("Error loading toml:", err)
 	}
@@ -532,7 +511,7 @@ func (g *GoogleOIDC) getUserTree(username string) *toml.Tree {
 }
 
 func (g *GoogleOIDC) saveTOMLTree(tree *toml.Tree) {
-	tomlFile, err := os.Create(g.Cfg.tomlPath)
+	tomlFile, err := os.Create(g.tomlPath)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -541,7 +520,7 @@ func (g *GoogleOIDC) saveTOMLTree(tree *toml.Tree) {
 		log.Fatalln(err)
 	}
 	log.Println(tree.String())
-	log.Println(g.Cfg.tomlPath, "successfully saved.")
+	log.Println(g.tomlPath, "successfully saved.")
 }
 
 // TODO: Actually get this working!
@@ -596,13 +575,13 @@ func (g *GoogleOIDC) DeleteUser(username string) error {
 	return nil
 }
 
-// In this case, take the raw ID token, and verify it against the Google OIDC endpoint
-func (t *GoogleOIDC) DoesUserExist(username string) bool {
+// DoesUserExist in this case, takes the raw ID token, and verifies it against the Google OIDC endpoint
+func (g *GoogleOIDC) DoesUserExist(username string) bool {
 	// Might reuse this check below at some point, to check if a user has registered before or something?
 	//return t.getTOMLTree().HasPath([]string{"users", username})
 
 	// Parse and verify ID Token payload.
-	idToken, err := t.OIDC.Verifier.Verify(context.Background(), username)
+	idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
 	if err != nil {
 		log.Println("Error verifying rawIDToken:", err)
 		return false
@@ -622,9 +601,11 @@ func (t *GoogleOIDC) DoesUserExist(username string) bool {
 	return true
 }
 
-func (t *GoogleOIDC) GetUserInfo(username string) *User {
+// GetUserInfo verifies a given ID token (retrieved from a cookie more than likely) and unmarshal's the 'claim', picking the email address out
+// It also attempts to fetch the user's role from the TOML file
+func (g *GoogleOIDC) GetUserInfo(username string) *User {
 	// Parse and verify ID Token payload.
-	idToken, err := t.OIDC.Verifier.Verify(context.Background(), username)
+	idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
 	if err != nil {
 		log.Println("Error verifying rawIDToken:", err)
 		return nil
@@ -643,8 +624,10 @@ func (t *GoogleOIDC) GetUserInfo(username string) *User {
 	}
 
 	var role string
-	if t.getTOMLTree().HasPath([]string{"users", username}) {
-		tree := t.getTOMLTree().GetPath([]string{"users", username}).(*toml.Tree)
+	// If TOML contains [users.username], try and fetch users role from it
+	// Otherwise presume they are just a 'user'
+	if g.getTOMLTree().HasPath([]string{"users", username}) {
+		tree := g.getTOMLTree().GetPath([]string{"users", username}).(*toml.Tree)
 		role = tree.Get("role").(string)
 	}
 
@@ -820,12 +803,12 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 
 // NewUser creates a new user with a given plaintext username and password
 func (state *State) NewUser(username, password string) error {
-	return state.Backend.newUser(username, password, roleUser)
+	return state.newUser(username, password, roleUser)
 }
 
 // NewAdmin creates a new admin with a given plaintext username and password
 func (state *State) NewAdmin(username, password string) error {
-	return state.Backend.newUser(username, password, roleAdmin)
+	return state.newUser(username, password, roleAdmin)
 }
 
 // newUser is a dedicated function to create new users, taking plaintext username, password, and role
@@ -1020,7 +1003,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		//newc = newChkContext(newc)
 
 		if username != "" {
-			u := state.Backend.GetUserInfo(username)
+			u := state.GetUserInfo(username)
 			newc = newUserContext(newc, u)
 		}
 
@@ -1225,7 +1208,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		password := template.HTMLEscapeString(r.FormValue("password"))
 
 		// Login authentication
-		if state.Backend.Auth(username, password) {
+		if state.Auth(username, password) {
 			state.setSession("user", username, w)
 			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
@@ -1250,27 +1233,4 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Give an error message.
 	}
-}
-
-func (g *GoogleOIDC) Init() {
-	provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
-	if err != nil {
-		log.Fatalln("Error setting up GoogleOIDC provider:", err)
-	}
-
-	g.OIDC = oidcConnectors{
-		Provider: provider,
-		Verifier: provider.Verifier(&oidc.Config{ClientID: g.Cfg.clientID}),
-		Cfg: &oauth2.Config{
-			ClientID:     g.Cfg.clientID,
-			ClientSecret: g.Cfg.clientSecret,
-			RedirectURL:  g.Cfg.redirectURL,
-			// Discovery returns the OAuth2 endpoints.
-			Endpoint: provider.Endpoint(),
-
-			// "openid" is a required scope for OpenID Connect flows.
-			Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
-		},
-	}
-
 }
