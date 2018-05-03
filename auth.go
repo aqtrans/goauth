@@ -83,8 +83,8 @@ type authBackend interface {
 	DeleteUser(username string) error
 	UpdatePass(username string, hash []byte) error
 	// These are very OIDC-specific
-	//Login(w http.ResponseWriter, r *http.Request)
-	//LoginCallback(w http.ResponseWriter, r *http.Request)
+	GetLoginURL(rand string) string
+	VerifyUser(code string) (string, error)
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -102,6 +102,12 @@ type oidcConnectors struct {
 	Provider *oidc.Provider
 	Verifier *oidc.IDTokenVerifier
 	Cfg      *oauth2.Config
+}
+
+type oidcClaims struct {
+	Email    string `json:"email"`
+	Verified bool   `json:"email_verified"`
+	//Username string `json:"preferred_username"`
 }
 
 type authInfo struct {
@@ -344,12 +350,12 @@ func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
 	return state.readSession("state", w, r)
 }
 
-func (state *State) SetToken(msg string, w http.ResponseWriter) {
-	state.setSession("token", msg, w)
+func (state *State) SetUsername(msg string, w http.ResponseWriter) {
+	state.setSession("username", msg, w)
 }
 
-func (state *State) ReadToken(w http.ResponseWriter, r *http.Request) string {
-	return state.readSession("token", w, r)
+func (state *State) ReadUsername(w http.ResponseWriter, r *http.Request) string {
+	return state.readSession("username", w, r)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -588,10 +594,7 @@ func (g *GoogleOIDC) DoesUserExist(username string) bool {
 	}
 
 	// Extract custom claims
-	var claims struct {
-		Email    string `json:"email"`
-		Verified bool   `json:"email_verified"`
-	}
+	var claims oidcClaims
 	if err == nil {
 		if err := idToken.Claims(&claims); err != nil {
 			log.Println("Error extracting claims:", err)
@@ -604,24 +607,23 @@ func (g *GoogleOIDC) DoesUserExist(username string) bool {
 // GetUserInfo verifies a given ID token (retrieved from a cookie more than likely) and unmarshal's the 'claim', picking the email address out
 // It also attempts to fetch the user's role from the TOML file
 func (g *GoogleOIDC) GetUserInfo(username string) *User {
-	// Parse and verify ID Token payload.
-	idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
-	if err != nil {
-		log.Println("Error verifying rawIDToken:", err)
-		return nil
-	}
-
-	// Extract custom claims
-	var claims struct {
-		Email    string `json:"email"`
-		Verified bool   `json:"email_verified"`
-	}
-	if err == nil {
-		if err := idToken.Claims(&claims); err != nil {
-			log.Println("Error extracting claims:", err)
+	/*
+		// Parse and verify ID Token payload.
+		idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
+		if err != nil {
+			log.Println("Error verifying rawIDToken:", err)
 			return nil
 		}
-	}
+
+		// Extract custom claims
+		var claims oidcClaims
+		if err == nil {
+			if err := idToken.Claims(&claims); err != nil {
+				log.Println("Error extracting claims:", err)
+				return nil
+			}
+		}
+	*/
 
 	var role string
 	// If TOML contains [users.username], try and fetch users role from it
@@ -635,7 +637,7 @@ func (g *GoogleOIDC) GetUserInfo(username string) *User {
 		role = roleUser
 	}
 	user := &User{
-		Name: claims.Email,
+		Name: username,
 		Role: role,
 	}
 	return user
@@ -670,6 +672,60 @@ func (t *GoogleOIDC) newUser(username, password, role string) error {
 	tree := t.getTOMLTree().Get("users").(*toml.Tree)
 	tree.SetPath([]string{"users", username, "role"}, role)
 	return nil
+}
+
+// GetLoginURL takes a (hopefully) randomly generated string and passes it along to AuthCodeURL
+// This random string should be set in the cookie using userstate.SetState(), then read in the callback HTTP handler
+func (g *GoogleOIDC) GetLoginURL(rand string) string {
+	return g.Connectors.Cfg.AuthCodeURL(rand)
+}
+
+func (g *GoogleOIDC) VerifyUser(code string) (string, error) {
+
+	token, err := g.Connectors.Cfg.Exchange(context.Background(), code)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Code exchange failed: %v", err)
+		return "", errors.New(errorMsg)
+	}
+
+	// Extract the ID Token from OAuth2 token.
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		return "", errors.New("id_token missing")
+	}
+
+	// Parse and verify ID Token payload.
+	idToken, err := g.Connectors.Verifier.Verify(context.Background(), rawIDToken)
+	if err != nil {
+		errorMsg := fmt.Sprintf("Error verifying rawIDToken: %v", err)
+		return "", errors.New(errorMsg)
+	}
+
+	// Extract custom claims from id_token
+	var claims oidcClaims
+	if err := idToken.Claims(&claims); err != nil {
+		errorMsg := fmt.Sprintf("Error extracting claims:", err)
+		return "", errors.New(errorMsg)
+	}
+	log.Println(claims)
+
+	// Possible TODO: Return token.AccessToken here?
+	// Findings on whether storing the id_token in cookie are mixed
+	// This is a secure cookie, so should be OK from prying eyes
+
+	// Could I store the "code" given at the top? Unsure what exactly that is
+
+	// Only returning username for now...
+	return claims.Email, nil
+
+}
+
+func (db *DB) GetLoginURL(rand string) string {
+	return LoginPath
+}
+
+func (db *DB) VerifyUser(code string) (string, error) {
+	return "", nil
 }
 
 func (db *DB) Auth(username, password string) bool {
