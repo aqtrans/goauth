@@ -26,12 +26,12 @@ func main() {
 }
 
 func handleMain(w http.ResponseWriter, r *http.Request) {
-	token := userstate.ReadToken(w, r)
+	username := userstate.ReadUsername(w, r)
 
-	if userstate.DoesUserExist(token) {
+	if username != "" {
 		fmt.Fprintf(w, `<html><body>
 			Welcome %v!
-			</body></html>`, userstate.GetUserInfo(token).Name)
+			</body></html>`, userstate.GetUserInfo(username).Name)
 		return
 	}
 
@@ -45,7 +45,7 @@ func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	b := auth.RandString(8)
 	userstate.SetState(b, w)
 
-	url := userstate.Connectors.Cfg.AuthCodeURL(b)
+	url := userstate.GetLoginURL(b)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
@@ -61,39 +61,18 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := r.FormValue("code")
-	token, err := userstate.OIDC.Cfg.Exchange(r.Context(), code)
+	username, err := userstate.VerifyUser(code)
 	if err != nil {
-		log.Println("Code exchange failed:", err)
+		log.Println("Error verifying user:", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
-	// Extract the ID Token from OAuth2 token.
-	rawIDToken, ok := token.Extra("id_token").(string)
-	if !ok {
-		log.Println("id_token missing.")
-		return
-	}
-
-	// Parse and verify ID Token payload.
-	idToken, err := userstate.OIDC.Verifier.Verify(r.Context(), rawIDToken)
-	if err != nil {
-		log.Println("Error verifying rawIDToken:", err)
-		return
-	}
+	userstate.SetUsername(username, w)
 
 	// Set the ID token into the "token" securecookie
-	userstate.SetToken(rawIDToken, w)
+	//userstate.SetToken(rawIDToken, w)
 
-	// Extract custom claims
-	var claims struct {
-		Email    string `json:"email"`
-		Verified bool   `json:"email_verified"`
-	}
-	if err := idToken.Claims(&claims); err != nil {
-		log.Println("Error extracting claims:", err)
-		return
-	}
-	log.Println(claims)
-	w.Write([]byte(claims.Email))
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	return
 }
