@@ -29,9 +29,10 @@ func handleMain(w http.ResponseWriter, r *http.Request) {
 	username := userstate.ReadUsername(w, r)
 
 	if username != "" {
+		userInfo := userstate.GetUserInfo(username)
 		fmt.Fprintf(w, `<html><body>
-			Welcome %v!
-			</body></html>`, userstate.GetUserInfo(username).Name)
+			Welcome %v! You are a %v.
+			</body></html>`, userInfo.Name, userInfo.Role)
 		return
 	}
 
@@ -61,7 +62,10 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := r.FormValue("code")
-	username, err := userstate.VerifyUser(code)
+	username, nonce, err := userstate.VerifyUser(code)
+	if nonce != expectedState {
+		log.Println("Nonce does not match!")
+	}
 	if err != nil {
 		log.Println("Error verifying user:", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
