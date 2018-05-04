@@ -1337,6 +1337,7 @@ func (state *State) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 
 	if cookieState != expectedState {
 		log.Println("state and expectedState do not match.", state, expectedState)
+		state.clearSession("state", w)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
@@ -1344,10 +1345,14 @@ func (state *State) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	username, nonce, err := state.VerifyUser(code)
 	if nonce != expectedState {
+		state.clearSession("state", w)
 		log.Println("Nonce does not match!")
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
 	}
 	if err != nil {
 		log.Println("Error verifying user:", err)
+		state.clearSession("state", w)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
