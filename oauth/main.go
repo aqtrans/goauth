@@ -11,7 +11,7 @@ import (
 var userstate *auth.State
 
 func main() {
-	userstate = auth.NewOIDCAuthState("omg.toml", "1095755855869-qk6in13jr4ckf604qp59511ossihkqle.apps.googleusercontent.com", "IFriZgF-yDdOsOAQ6W6gDFHD", "http://127.0.0.1:3000/callback")
+	userstate = auth.NewOIDCAuthState("auth.toml", "CLIENT-ID", "SECRET", "http://127.0.0.1:3000/callback")
 
 	auth.Debug = true
 	http.HandleFunc("/", handleMain)
