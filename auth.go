@@ -368,11 +368,11 @@ func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
 }
 
 func (state *State) SetUsername(msg string, w http.ResponseWriter) {
-	state.setSession("username", msg, w)
+	state.setSession("user", msg, w)
 }
 
 func (state *State) ReadUsername(w http.ResponseWriter, r *http.Request) string {
-	return state.readSession("username", w, r)
+	return state.readSession("user", w, r)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -721,7 +721,7 @@ func (g *GoogleOIDC) VerifyUser(code string) (string, string, error) {
 		return "", "", errors.New(errorMsg)
 	}
 
-	log.Println("Token Nonce:", idToken.Nonce)
+	//log.Println("Token Nonce:", idToken.Nonce)
 
 	/*
 		// Extract custom claims from id_token
@@ -745,7 +745,8 @@ func (g *GoogleOIDC) VerifyUser(code string) (string, string, error) {
 
 	// Could I store the "code" given at the top? Unsure what exactly that is
 
-	// Only returning username for now...
+	// Returning users email, and the nonce from the token.
+	// That nonce is then compared to the nonce inside the client cookie in GoogleCallback()
 	return userInfo.Email, idToken.Nonce, nil
 
 }
@@ -1319,4 +1320,52 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Give an error message.
 	}
+}
+
+func (state *State) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	b := RandString(12)
+	state.SetState(b, w)
+
+	url := state.GetLoginURL(b)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+func (state *State) GoogleCallback(w http.ResponseWriter, r *http.Request) {
+
+	cookieState := r.FormValue("state")
+	expectedState := state.ReadState(w, r)
+
+	if cookieState != expectedState {
+		log.Println("state and expectedState do not match.", state, expectedState)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	code := r.FormValue("code")
+	username, nonce, err := state.VerifyUser(code)
+	if nonce != expectedState {
+		log.Println("Nonce does not match!")
+	}
+	if err != nil {
+		log.Println("Error verifying user:", err)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	state.SetUsername(username, w)
+
+	// Set the ID token into the "token" securecookie
+	//userstate.SetToken(rawIDToken, w)
+
+	state.SetFlash("User '"+username+"' successfully logged in.", w)
+	// Check if we have a redirect URL in the cookie, if so redirect to it
+	redirURL := state.readSession("redirect", w, r)
+	if redirURL != "" {
+		log.Println("Redirecting to", redirURL)
+		state.clearSession("redirect", w)
+		http.Redirect(w, r, redirURL, http.StatusTemporaryRedirect)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	return
 }
