@@ -84,7 +84,7 @@ type authBackend interface {
 	UpdatePass(username string, hash []byte) error
 	// These are very OIDC-specific
 	GetLoginURL(rand string) string
-	VerifyUser(code string) (string, error)
+	VerifyUser(code string) (string, string, error)
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -222,9 +222,21 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *State {
 	}
 
 	// Load TOML if it exists:
-	tree, err := toml.LoadFile(path)
-	if err != nil && err != os.ErrNotExist {
-		log.Fatalln("Error loading toml:", err)
+	var tree *toml.Tree
+	tree, err = toml.LoadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			_, err := os.Create(path)
+			if err != nil {
+				log.Fatalln("Error creating toml:", err)
+			}
+			tree, err = toml.LoadFile(path)
+			if err != nil {
+				log.Fatalln("Error loading toml:", err)
+			}
+		} else {
+			log.Fatalln("Error loading toml:", err)
+		}
 	}
 
 	if !tree.Has("AuthInfo") {
@@ -236,8 +248,8 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *State {
 		g.saveTOMLTree(tree)
 	}
 
-	omg1, omg2 := g.getAuthInfo()
-	log.Println(len(omg1), len(omg2))
+	//omg1, omg2 := g.getAuthInfo()
+	//log.Println(len(omg1), len(omg2))
 
 	return &State{
 		authBackend: g,
@@ -342,12 +354,17 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession("flash", msg, w)
 }
 
+// SetState sets the state, for OIDC connections
 func (state *State) SetState(msg string, w http.ResponseWriter) {
 	state.setSession("state", msg, w)
 }
 
+// ReadState reads the state (and nonce, but they should be the same value)
 func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
-	return state.readSession("state", w, r)
+	theState := state.readSession("state", w, r)
+	// Clear state cookie after it's read
+	state.clearSession("state", w)
+	return theState
 }
 
 func (state *State) SetUsername(msg string, w http.ResponseWriter) {
@@ -585,23 +602,26 @@ func (g *GoogleOIDC) DeleteUser(username string) error {
 func (g *GoogleOIDC) DoesUserExist(username string) bool {
 	// Might reuse this check below at some point, to check if a user has registered before or something?
 	//return t.getTOMLTree().HasPath([]string{"users", username})
-
-	// Parse and verify ID Token payload.
-	idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
-	if err != nil {
-		log.Println("Error verifying rawIDToken:", err)
-		return false
-	}
-
-	// Extract custom claims
-	var claims oidcClaims
-	if err == nil {
-		if err := idToken.Claims(&claims); err != nil {
-			log.Println("Error extracting claims:", err)
+	/*
+		// Parse and verify ID Token payload.
+		idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
+		if err != nil {
+			log.Println("Error verifying rawIDToken:", err)
 			return false
 		}
-	}
-	return true
+
+		// Extract custom claims
+		var claims oidcClaims
+		if err == nil {
+			if err := idToken.Claims(&claims); err != nil {
+				log.Println("Error extracting claims:", err)
+				return false
+			}
+		}
+		return true
+	*/
+
+	return false
 }
 
 // GetUserInfo verifies a given ID token (retrieved from a cookie more than likely) and unmarshal's the 'claim', picking the email address out
@@ -677,37 +697,47 @@ func (t *GoogleOIDC) newUser(username, password, role string) error {
 // GetLoginURL takes a (hopefully) randomly generated string and passes it along to AuthCodeURL
 // This random string should be set in the cookie using userstate.SetState(), then read in the callback HTTP handler
 func (g *GoogleOIDC) GetLoginURL(rand string) string {
-	return g.Connectors.Cfg.AuthCodeURL(rand)
+	return g.Connectors.Cfg.AuthCodeURL(rand, oidc.Nonce(rand))
 }
 
-func (g *GoogleOIDC) VerifyUser(code string) (string, error) {
+func (g *GoogleOIDC) VerifyUser(code string) (string, string, error) {
 
 	token, err := g.Connectors.Cfg.Exchange(context.Background(), code)
 	if err != nil {
 		errorMsg := fmt.Sprintf("Code exchange failed: %v", err)
-		return "", errors.New(errorMsg)
+		return "", "", errors.New(errorMsg)
 	}
 
 	// Extract the ID Token from OAuth2 token.
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
-		return "", errors.New("id_token missing")
+		return "", "", errors.New("id_token missing")
 	}
 
 	// Parse and verify ID Token payload.
 	idToken, err := g.Connectors.Verifier.Verify(context.Background(), rawIDToken)
 	if err != nil {
 		errorMsg := fmt.Sprintf("Error verifying rawIDToken: %v", err)
-		return "", errors.New(errorMsg)
+		return "", "", errors.New(errorMsg)
 	}
 
-	// Extract custom claims from id_token
-	var claims oidcClaims
-	if err := idToken.Claims(&claims); err != nil {
-		errorMsg := fmt.Sprintf("Error extracting claims:", err)
-		return "", errors.New(errorMsg)
+	log.Println("Token Nonce:", idToken.Nonce)
+
+	/*
+		// Extract custom claims from id_token
+		var claims oidcClaims
+		if err := idToken.Claims(&claims); err != nil {
+			errorMsg := fmt.Sprintf("Error extracting claims:", err)
+			return "", errors.New(errorMsg)
+		}
+		log.Println(claims)
+	*/
+
+	userInfo, err := g.Connectors.Provider.UserInfo(context.Background(), oauth2.StaticTokenSource(token))
+	if err != nil {
+		errorMsg := fmt.Sprintf("Error fetching user info using token: %v", err)
+		return "", "", errors.New(errorMsg)
 	}
-	log.Println(claims)
 
 	// Possible TODO: Return token.AccessToken here?
 	// Findings on whether storing the id_token in cookie are mixed
@@ -716,7 +746,7 @@ func (g *GoogleOIDC) VerifyUser(code string) (string, error) {
 	// Could I store the "code" given at the top? Unsure what exactly that is
 
 	// Only returning username for now...
-	return claims.Email, nil
+	return userInfo.Email, idToken.Nonce, nil
 
 }
 
@@ -724,8 +754,8 @@ func (db *DB) GetLoginURL(rand string) string {
 	return LoginPath
 }
 
-func (db *DB) VerifyUser(code string) (string, error) {
-	return "", nil
+func (db *DB) VerifyUser(code string) (string, string, error) {
+	return "", "", nil
 }
 
 func (db *DB) Auth(username, password string) bool {
