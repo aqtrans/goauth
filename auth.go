@@ -78,7 +78,6 @@ var (
 
 // State holds all required info to get authentication working in the app
 type State struct {
-	authBackend
 	cookie *securecookie.SecureCookie
 }
 
@@ -93,16 +92,18 @@ type authBackend interface {
 	UpdatePass(username string, hash []byte) error
 	// These are very OIDC-specific
 	GetLoginURL(rand string) string
-	VerifyUser(code string) (string, string, error)
+	VerifyToken(code string) (string, string, error)
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
 type DB struct {
+	State
 	authdb *bolt.DB
 	path   string
 }
 
 type GoogleOIDC struct {
+	State
 	tomlPath   string
 	Connectors oidcConnectors
 }
@@ -199,20 +200,25 @@ func (db *DB) releaseDB() {
 }
 
 // NewBoltAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
-func NewBoltAuthState(path string) *State {
+func NewBoltAuthState(path string) *DB {
 	var db *bolt.DB
 
 	return NewBoltAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
-func NewOIDCAuthState(path, id, secret, redirectURL string) *State {
+func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
 
 	provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
 	if err != nil {
 		log.Fatalln("Error setting up GoogleOIDC provider:", err)
 	}
 
+	var theCookie *securecookie.SecureCookie
+
 	g := &GoogleOIDC{
+		State: State{
+			cookie: theCookie,
+		},
 		tomlPath: path,
 		Connectors: oidcConnectors{
 			Provider: provider,
@@ -257,13 +263,12 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *State {
 		g.saveTOMLTree(tree)
 	}
 
+	theCookie = securecookie.New(g.getAuthInfo())
+
 	//omg1, omg2 := g.getAuthInfo()
 	//log.Println(len(omg1), len(omg2))
 
-	return &State{
-		authBackend: g,
-		cookie:      securecookie.New(g.getAuthInfo()),
-	}
+	return g
 }
 
 // NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
