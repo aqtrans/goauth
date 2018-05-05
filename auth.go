@@ -90,13 +90,14 @@ type authInfo struct {
 	blockKey []byte
 }
 
+// User is what is stored inside the boltDB, and also returned and stored inside the context
 type User struct {
 	Name     string
 	Password []byte
 	Role     string
 }
 
-type Flash struct {
+type flash struct {
 	Msg string
 }
 
@@ -186,7 +187,7 @@ func NewBoltAuthStateWithDB(db *DB, path string) *State {
 }
 
 // RandBytes generates a random amount of bytes given a specified length
-func RandBytes(n int) []byte {
+func randBytes(n int) []byte {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
 	// Note that err == nil only if we read len(b) bytes.
@@ -197,9 +198,9 @@ func RandBytes(n int) []byte {
 	return b
 }
 
-func RandString(n int) string {
+func randString(n int) string {
 	const letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-"
-	bytes := RandBytes(n)
+	bytes := randBytes(n)
 	for i, b := range bytes {
 		bytes[i] = letters[b%byte(len(letters))]
 	}
@@ -217,7 +218,9 @@ func CheckPasswordHash(hash, password []byte) error {
 	return bcrypt.CompareHashAndPassword(hash, password)
 }
 
-func newUserContext(c context.Context, u *User) context.Context {
+// NewUserInContext takes a username and context, grabs the info for the user, and crams it into the given context
+func (state *State) NewUserInContext(c context.Context, username string) context.Context {
+	u := state.getUserInfo(username)
 	return context.WithValue(c, UserKey, u)
 }
 
@@ -226,22 +229,13 @@ func userFromContext(c context.Context) (*User, bool) {
 	return u, ok
 }
 
-func newFlashContext(c context.Context, f *Flash) context.Context {
+func (f *flash) NewFlashInContext(c context.Context) context.Context {
 	return context.WithValue(c, MsgKey, f)
 }
 
-func flashFromContext(c context.Context) (*Flash, bool) {
-	f, ok := c.Value(MsgKey).(*Flash)
+func flashFromContext(c context.Context) (*flash, bool) {
+	f, ok := c.Value(MsgKey).(*flash)
 	return f, ok
-}
-
-func newChkContext(c context.Context) context.Context {
-	return context.WithValue(c, ChkKey, true)
-}
-
-func chkFromContext(c context.Context) bool {
-	_, ok := c.Value(ChkKey).(bool)
-	return ok
 }
 
 // SetSession Takes a key, and a value to store inside a cookie
@@ -268,19 +262,6 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession(cookieFlash, msg, w)
 }
 
-// SetState sets the state, for OIDC connections
-func (state *State) SetState(msg string, w http.ResponseWriter) {
-	state.setSession(cookieState, msg, w)
-}
-
-// ReadState reads the state (and nonce, but they should be the same value)
-func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
-	theState := state.readSession(cookieState, w, r)
-	// Clear state cookie after it's read
-	state.clearSession(cookieState, w)
-	return theState
-}
-
 // SetRegisterKey sets the register key, for use in registration
 func (state *State) SetRegisterKey(msg string, w http.ResponseWriter) {
 	state.setSession(cookieRegisterKey, msg, w)
@@ -294,10 +275,12 @@ func (state *State) ReadRegisterKey(w http.ResponseWriter, r *http.Request) stri
 	return theKey
 }
 
+// SetUsername sets the username into the cookie
 func (state *State) SetUsername(msg string, w http.ResponseWriter) {
 	state.setSession(cookieUser, msg, w)
 }
 
+// ReadUsername reads the username from the cookie
 func (state *State) ReadUsername(w http.ResponseWriter, r *http.Request) string {
 	return state.readSession(cookieUser, w, r)
 }
@@ -393,6 +376,8 @@ func IsLoggedIn(c context.Context) bool {
 	return false
 }
 
+// GetUserState returns a *User from the context
+// The *User should have been crammed in there by UserEnvMiddle
 func GetUserState(c context.Context) *User {
 	userC, ok := userFromContext(c)
 	if ok {
@@ -425,9 +410,10 @@ func GetFlash(c context.Context) string {
 	return flash
 }
 
-func (user *User) IsAdmin() bool {
-	if user != nil {
-		if user.Role == roleAdmin {
+// IsAdmin checks if the given user is an admin
+func (u *User) IsAdmin() bool {
+	if u != nil {
+		if u.Role == roleAdmin {
 			return true
 		}
 	}
@@ -435,19 +421,21 @@ func (user *User) IsAdmin() bool {
 	return false
 }
 
-func (user *User) GetName() string {
-	if user != nil {
-		return user.Name
+// GetName returns the user's Name
+func (u *User) GetName() string {
+	if u != nil {
+		return u.Name
 	}
 	return ""
 }
 
+// Auth authenticates a given username and password
 func (db *DB) Auth(username, password string) bool {
 
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
-	var user *User
+	var u *User
 	// Grab given user's password from Bolt
 	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
@@ -456,12 +444,12 @@ func (db *DB) Auth(username, password string) bool {
 			return errors.New(errUserDoesNotExist)
 		}
 
-		err := json.Unmarshal(v, &user)
+		err := json.Unmarshal(v, &u)
 		if err != nil {
 			check(err)
 			return err
 		}
-		err = CheckPasswordHash(user.Password, []byte(password))
+		err = CheckPasswordHash(u.Password, []byte(password))
 		if err != nil {
 			// Incorrect password, malformed hash, etc.
 			debugln("error verifying password for user", username, err)
@@ -479,7 +467,7 @@ func (db *DB) Auth(username, password string) bool {
 	return true
 }
 
-// Check if user actually exists
+// DoesUserExist checks if user actually exists in the DB
 func (db *DB) DoesUserExist(username string) bool {
 	boltdb := db.getDB()
 	defer db.releaseDB()
@@ -502,9 +490,9 @@ func (db *DB) DoesUserExist(username string) bool {
 	return false
 }
 
-// Get a *User from the bucket
-func (db *DB) GetUserInfo(username string) *User {
-	var user *User
+// GetUserInfo gets a *User from the DB
+func (db *DB) getUserInfo(username string) *User {
+	var u *User
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
@@ -514,7 +502,7 @@ func (db *DB) GetUserInfo(username string) *User {
 		if v == nil {
 			return errors.New(errUserDoesNotExist)
 		}
-		err := json.Unmarshal(v, &user)
+		err := json.Unmarshal(v, &u)
 		if err != nil {
 			check(err)
 			return err
@@ -525,7 +513,7 @@ func (db *DB) GetUserInfo(username string) *User {
 		check(err)
 		return nil
 	}
-	return user
+	return u
 
 	/*
 		s := &Shorturl{
@@ -566,6 +554,7 @@ func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
 	return hashkey, blockkey
 }
 
+// LogoutHandler clears the "user" cookie, logging the user out
 func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	state.clearSession(cookieUser, w)
 	http.Redirect(w, r, r.Referer(), 302)
@@ -640,6 +629,7 @@ func (db *DB) newUser(username, password, role string) error {
 	return nil
 }
 
+// Userlist lists all users in the DB
 func (db *DB) Userlist() ([]string, error) {
 	boltdb := db.getDB()
 	defer db.releaseDB()
@@ -661,6 +651,7 @@ func (db *DB) Userlist() ([]string, error) {
 	return userList, err
 }
 
+// DeleteUser deletes a given user from the DB
 func (db *DB) DeleteUser(username string) error {
 	boltdb := db.getDB()
 	defer db.releaseDB()
@@ -675,6 +666,8 @@ func (db *DB) DeleteUser(username string) error {
 	return err
 }
 
+// UpdatePass updates a given user's password to the given hash
+// Password hashing must be done by the caller
 func (db *DB) UpdatePass(username string, hash []byte) error {
 	boltdb := db.getDB()
 	defer db.releaseDB()
@@ -689,16 +682,16 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 			return errors.New(errUserDoesNotExist)
 		}
 
-		var user *User
-		err := json.Unmarshal(userbucketUser, &user)
+		var u *User
+		err := json.Unmarshal(userbucketUser, &u)
 		if err != nil {
 			check(err)
 			return err
 		}
 
-		user.Password = hash
+		u.Password = hash
 
-		encoded, err := json.Marshal(user)
+		encoded, err := json.Marshal(u)
 		if err != nil {
 			log.Println(err)
 			return err
@@ -723,6 +716,7 @@ func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+// AuthMiddle is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
 func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !IsLoggedIn(r.Context()) {
@@ -732,6 +726,7 @@ func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+// AuthMiddleHandler is a middleware to protect a given handler; users only access
 func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !IsLoggedIn(r.Context()) {
@@ -741,6 +736,7 @@ func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 	})
 }
 
+// AuthAdminMiddle is a middleware to protect a given handler; admin only access
 func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := GetUserState(r.Context())
@@ -773,15 +769,14 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		//newc = newChkContext(newc)
 
 		if username != "" {
-			u := state.GetUserInfo(username)
-			newc = newUserContext(newc, u)
+			newc = state.NewUserInContext(newc, username)
 		}
 
 		if message != "" {
-			f := &Flash{
+			f := &flash{
 				Msg: message,
 			}
-			newc = newFlashContext(newc, f)
+			newc = f.NewFlashInContext(newc)
 		}
 
 		next.ServeHTTP(w, r.WithContext(newc))
@@ -820,7 +815,7 @@ func (db *DB) dbInit() {
 		// Check if no users exist. If so, generate a registration key
 		if userBucket.Stats().KeyN == 0 {
 			log.Println("No users exist. Follow registration URL below to register a new admin user:")
-			token := RandString(12)
+			token := randString(12)
 			err = registerKeyBucket.Put([]byte(token), []byte(roleAdmin))
 			if err != nil {
 				check(err)
@@ -838,7 +833,7 @@ func (db *DB) dbInit() {
 		if hashKey == nil {
 			debugln("Throwing hashkey into auth.db.")
 			// Generate a random hashKey
-			hashKey := RandBytes(64)
+			hashKey := randBytes(64)
 
 			err = infobucket.Put([]byte(hashKeyName), hashKey)
 			if err != nil {
@@ -851,7 +846,7 @@ func (db *DB) dbInit() {
 		if blockKey == nil {
 			debugln("Throwing blockkey into auth.db.")
 			// Generate a random blockKey
-			blockKey := RandBytes(32)
+			blockKey := randBytes(32)
 
 			err = infobucket.Put([]byte(blockKeyName), blockKey)
 			if err != nil {
@@ -1045,7 +1040,7 @@ func (db *DB) GenerateRegisterToken(role string) string {
 		role = roleUser
 	}
 
-	token := RandString(12)
+	token := randString(12)
 	boltDB := db.getDB()
 	defer db.releaseDB()
 
@@ -1067,6 +1062,7 @@ func (db *DB) GenerateRegisterToken(role string) string {
 	return token
 }
 
+// ValidateRegisterToken validates that a given registration token is valid, exists inside the DB
 func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 	boltDB := db.getDB()
 	defer db.releaseDB()

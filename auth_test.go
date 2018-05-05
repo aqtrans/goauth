@@ -88,27 +88,26 @@ func TestContext(t *testing.T) {
 	// Try fetching without anything in the context first
 	ctx := context.Background()
 
-	user := GetUserState(ctx)
-	if user != nil {
-		t.Error("user from context is not nil")
+	userState := GetUserState(ctx)
+	if userState != nil {
+		t.Error("userState from context is not nil")
 	}
 
 	if IsLoggedIn(ctx) {
 		t.Error("IsLoggedIn from context is not false")
 	}
 
-	userC1 := GetUserState(ctx)
-	if userC1 != nil {
-		t.Error("userC1.username has something in it")
+	userState2 := GetUserState(ctx)
+	if userState2 != nil {
+		t.Error("userState2.username has something in it")
 	}
 
-	// Now make a context
-	u := &User{
-		Name: "admin",
-		Role: roleAdmin,
-	}
+	tmpdb := tempfile()
+	authState := NewBoltAuthState(tmpdb)
+	defer os.Remove(tmpdb)
+	authState.NewAdmin("admin", "admin")
 
-	ctx = newUserContext(ctx, u)
+	ctx = authState.NewUserInContext(ctx, "admin")
 
 	user2 := GetUserState(ctx)
 	if user2.GetName() != "admin" {
@@ -127,10 +126,10 @@ func TestContext(t *testing.T) {
 		t.Error("userC2.username does not equal admin")
 	}
 
-	f := &Flash{
+	f := &flash{
 		Msg: "message",
 	}
-	ctx = newFlashContext(ctx, f)
+	ctx = f.NewFlashInContext(ctx)
 
 	msgC := GetFlash(ctx)
 	if msgC != f.Msg {
@@ -327,7 +326,7 @@ func TestReadUserInfo(t *testing.T) {
 		t.Error("Error adding NewAdmin(): ", err)
 	}
 
-	admin := authState.GetUserInfo("admin")
+	admin := authState.getUserInfo("admin")
 	if admin == nil {
 		t.Error("admin.User{} retrieved is nil.")
 	}
@@ -343,7 +342,7 @@ func TestReadUserInfo(t *testing.T) {
 		t.Error("Error adding NewUser: ", err)
 	}
 
-	user := authState.GetUserInfo("user")
+	user := authState.getUserInfo("user")
 	if user == nil {
 		t.Error("user.User{} retrieved is nil.")
 	}
