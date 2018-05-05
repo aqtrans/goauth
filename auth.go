@@ -1196,6 +1196,9 @@ func (db *DB) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		if isValid {
 			log.Println("Yay, registration token is valid!")
+			// Delete the token so it cannot be reused
+			db.DeleteRegisterToken(givenToken)
+
 			err := db.newUser(username, password, userRole)
 			if err != nil {
 				check(err)
@@ -1204,11 +1207,9 @@ func (db *DB) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			db.setSession(cookieFlash, "Successfully added '"+username+"' user.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
 		} else {
 			db.setSession(cookieFlash, "Registration token is invalid.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
 		}
 
 	case "PUT":
@@ -1459,4 +1460,26 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 	}
 
 	return true, string(userRole)
+}
+
+// DeleteRegisterToken deletes a registration token
+func (db *DB) DeleteRegisterToken(token string) {
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	err := boltDB.Update(func(tx *bolt.Tx) error {
+		registerBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		err = registerBucket.Delete([]byte(token))
+		if err != nil {
+			check(err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalln("Error putting register token into DB:", err)
+	}
 }
