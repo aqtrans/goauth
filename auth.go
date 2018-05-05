@@ -30,12 +30,8 @@ import (
 	"runtime"
 	"text/template"
 
-	"golang.org/x/oauth2"
 	//"text/template"
 	"time"
-
-	oidc "github.com/coreos/go-oidc"
-	"github.com/pelletier/go-toml"
 
 	"github.com/boltdb/bolt"
 	"github.com/gorilla/securecookie"
@@ -80,46 +76,13 @@ var (
 // State holds all required info to get authentication working in the app
 type State struct {
 	cookie *securecookie.SecureCookie
-	authBackend
-}
-
-type authBackend interface {
-	//Auth(username, password string) bool
-	//DoesUserExist(username string) bool
-	GetUserInfo(username string) *User
-	getAuthInfo() (hashkey, blockkey []byte)
-	//newUser(username, password, role string) error
-	Userlist() ([]string, error)
-	//DeleteUser(username string) error
-	//UpdatePass(username string, hash []byte) error
-	// These are very OIDC-specific
-	//GetLoginURL(rand string) string
-	//VerifyToken(code string) (string, string, error)
+	DB
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
 type DB struct {
-	State
 	authdb *bolt.DB
 	path   string
-}
-
-type GoogleOIDC struct {
-	State
-	tomlPath   string
-	Connectors oidcConnectors
-}
-
-type oidcConnectors struct {
-	Provider *oidc.Provider
-	Verifier *oidc.IDTokenVerifier
-	Cfg      *oauth2.Config
-}
-
-type oidcClaims struct {
-	Email    string `json:"email"`
-	Verified bool   `json:"email_verified"`
-	//Username string `json:"preferred_username"`
 }
 
 type authInfo struct {
@@ -202,94 +165,24 @@ func (db *DB) releaseDB() {
 }
 
 // NewBoltAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
-func NewBoltAuthState(path string) *DB {
+func NewBoltAuthState(path string) *State {
 	var db *bolt.DB
 
 	return NewBoltAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
-func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
-
-	provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
-	if err != nil {
-		log.Fatalln("Error setting up GoogleOIDC provider:", err)
-	}
-
-	var theCookie *securecookie.SecureCookie
-
-	g := &GoogleOIDC{
-		tomlPath: path,
-		Connectors: oidcConnectors{
-			Provider: provider,
-			Verifier: provider.Verifier(&oidc.Config{ClientID: id}),
-			Cfg: &oauth2.Config{
-				ClientID:     id,
-				ClientSecret: secret,
-				RedirectURL:  redirectURL,
-				// Discovery returns the OAuth2 endpoints.
-				Endpoint: provider.Endpoint(),
-
-				// "openid" is a required scope for OpenID Connect flows.
-				Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
-			},
-		},
-	}
-	g.State = State{
-		cookie:      theCookie,
-		authBackend: g,
-	}
-
-	// Load TOML if it exists:
-	var tree *toml.Tree
-	tree, err = toml.LoadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			_, err := os.Create(path)
-			if err != nil {
-				log.Fatalln("Error creating toml:", err)
-			}
-			tree, err = toml.LoadFile(path)
-			if err != nil {
-				log.Fatalln("Error loading toml:", err)
-			}
-		} else {
-			log.Fatalln("Error loading toml:", err)
-		}
-	}
-
-	if !tree.Has("AuthInfo") {
-		log.Println(path, "does not contain AuthInfo. Generating them...")
-		hashKey := RandString(64)
-		tree.SetPath([]string{"AuthInfo", "HashKey"}, hashKey)
-		blockKey := RandString(32)
-		tree.SetPath([]string{"AuthInfo", "BlockKey"}, blockKey)
-		g.saveTOMLTree(tree)
-	}
-
-	theCookie = securecookie.New(g.getAuthInfo())
-
-	//omg1, omg2 := g.getAuthInfo()
-	//log.Println(len(omg1), len(omg2))
-
-	return g
-}
-
 // NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
-func NewBoltAuthStateWithDB(db *DB, path string) *DB {
+func NewBoltAuthStateWithDB(db *DB, path string) *State {
 	if path == "" {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
 
 	db.dbInit()
 
-	//db.cookie = securecookie.New(db.getAuthInfo())
-
-	db.State = State{
-		cookie:      securecookie.New(db.getAuthInfo()),
-		authBackend: db,
+	return &State{
+		cookie: securecookie.New(db.getAuthInfo()),
+		DB:     *db,
 	}
-
-	return db
 }
 
 // RandBytes generates a random amount of bytes given a specified length
@@ -547,213 +440,6 @@ func (user *User) GetName() string {
 		return user.Name
 	}
 	return ""
-}
-
-func (g *GoogleOIDC) getTOMLTree() *toml.Tree {
-	tree, err := toml.LoadFile(g.tomlPath)
-	if err != nil {
-		log.Fatalln("Error loading toml:", err)
-	}
-
-	return tree
-}
-
-func (g *GoogleOIDC) getUserTree(username string) *toml.Tree {
-	tree := g.getTOMLTree()
-	if tree.HasPath([]string{"users", username}) {
-		userTree := tree.GetPath([]string{"users", username}).(*toml.Tree)
-		return userTree
-	}
-	return nil
-}
-
-func (g *GoogleOIDC) saveTOMLTree(tree *toml.Tree) {
-	tomlFile, err := os.Create(g.tomlPath)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	_, err = tree.WriteTo(tomlFile)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	log.Println(tree.String())
-	log.Println(g.tomlPath, "successfully saved.")
-}
-
-/*
-// TODO: Actually get this working!
-func (g *GoogleOIDC) Auth(username, password string) bool {
-	tree := g.getTOMLTree()
-
-	// Only allow logging in when email is defined in the TOML
-	if tree.HasPath([]string{"users", username}) {
-
-		// Hash the password just given
-		hash, err := HashPassword([]byte(password))
-		if err != nil {
-			// couldn't hash password for some reason
-			log.Fatalln(err)
-		}
-
-		tree.SetPath([]string{"users", username, "password"}, string(hash))
-
-		// Set role to user if one was not given
-		if !tree.HasPath([]string{"users", username, "role"}) {
-			tree.SetPath([]string{"users", username, "role"}, roleUser)
-		}
-		g.saveTOMLTree(tree)
-		return true
-	}
-
-	if tree.HasPath([]string{"users", username}) {
-		hashString := tree.GetPath([]string{"users", username, "password"}).(string)
-		bHash := []byte(hashString)
-		err := CheckPasswordHash(bHash, []byte(password))
-		if err != nil {
-			log.Println("Error verifying password:", err)
-			return false
-		}
-		return true
-	}
-
-	return false
-}
-*/
-
-func (g *GoogleOIDC) DeleteUser(username string) error {
-	tree := g.getTOMLTree()
-	if tree.HasPath([]string{"users", username}) {
-		treeMap := tree.ToMap()
-		delete(treeMap, "users."+username)
-		newTree, err := toml.TreeFromMap(treeMap)
-		if err != nil {
-			return err
-		}
-		g.saveTOMLTree(newTree)
-	}
-	return nil
-}
-
-// DoesUserExist in this case, takes the raw ID token, and verifies it against the Google OIDC endpoint
-func (g *GoogleOIDC) DoesUserExistInTOML(username string) bool {
-	// Might reuse this check below at some point, to check if a user has registered before or something?
-	return g.getTOMLTree().HasPath([]string{"users", username})
-}
-
-// GetUserInfo verifies a given ID token (retrieved from a cookie more than likely) and unmarshal's the 'claim', picking the email address out
-// It also attempts to fetch the user's role from the TOML file
-func (g *GoogleOIDC) GetUserInfo(username string) *User {
-	/*
-		// Parse and verify ID Token payload.
-		idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
-		if err != nil {
-			log.Println("Error verifying rawIDToken:", err)
-			return nil
-		}
-
-		// Extract custom claims
-		var claims oidcClaims
-		if err == nil {
-			if err := idToken.Claims(&claims); err != nil {
-				log.Println("Error extracting claims:", err)
-				return nil
-			}
-		}
-	*/
-
-	var role string
-	// If TOML contains [users.username], try and fetch users role from it
-	// Otherwise presume they are just a 'user'
-	if g.getTOMLTree().HasPath([]string{"users", username}) {
-		tree := g.getTOMLTree().GetPath([]string{"users", username}).(*toml.Tree)
-		role = tree.Get("role").(string)
-	}
-
-	if role == "" {
-		role = roleUser
-	}
-	user := &User{
-		Name: username,
-		Role: role,
-	}
-	return user
-}
-
-func (t *GoogleOIDC) Userlist() ([]string, error) {
-	tree := t.getTOMLTree().Get("users").(*toml.Tree)
-	return tree.Keys(), nil
-
-}
-
-func (t *GoogleOIDC) getAuthInfo() (hashkey, blockkey []byte) {
-	tree := t.getTOMLTree().Get("AuthInfo").(*toml.Tree)
-	hashkeyS := tree.Get("HashKey").(string)
-	blockkeyS := tree.Get("BlockKey").(string)
-	return []byte(hashkeyS), []byte(blockkeyS)
-}
-
-func (t *GoogleOIDC) newUser(username, role string) error {
-	// Check that the given role is valid before even opening the DB
-	switch role {
-	case roleAdmin, roleUser:
-	default:
-		return errors.New("NewUser role is invalid: " + role)
-	}
-
-	tree := t.getTOMLTree().Get("users").(*toml.Tree)
-	tree.SetPath([]string{"users", username, "role"}, role)
-	return nil
-}
-
-func (g *GoogleOIDC) VerifyUser(code string) (string, string, error) {
-
-	token, err := g.Connectors.Cfg.Exchange(context.Background(), code)
-	if err != nil {
-		errorMsg := fmt.Sprintf("Code exchange failed: %v", err)
-		return "", "", errors.New(errorMsg)
-	}
-
-	// Extract the ID Token from OAuth2 token.
-	rawIDToken, ok := token.Extra("id_token").(string)
-	if !ok {
-		return "", "", errors.New("id_token missing")
-	}
-
-	// Parse and verify ID Token payload.
-	idToken, err := g.Connectors.Verifier.Verify(context.Background(), rawIDToken)
-	if err != nil {
-		errorMsg := fmt.Sprintf("Error verifying rawIDToken: %v", err)
-		return "", "", errors.New(errorMsg)
-	}
-
-	//log.Println("Token Nonce:", idToken.Nonce)
-
-	/*
-		// Extract custom claims from id_token
-		var claims oidcClaims
-		if err := idToken.Claims(&claims); err != nil {
-			errorMsg := fmt.Sprintf("Error extracting claims:", err)
-			return "", errors.New(errorMsg)
-		}
-		log.Println(claims)
-	*/
-
-	userInfo, err := g.Connectors.Provider.UserInfo(context.Background(), oauth2.StaticTokenSource(token))
-	if err != nil {
-		errorMsg := fmt.Sprintf("Error fetching user info using token: %v", err)
-		return "", "", errors.New(errorMsg)
-	}
-
-	// Possible TODO: Return token.AccessToken here?
-	// Findings on whether storing the id_token in cookie are mixed
-	// This is a secure cookie, so should be OK from prying eyes
-
-	// Could I store the "code" given at the top? Unsure what exactly that is
-
-	// Returning users email, and the nonce from the token.
-	// That nonce is then compared to the nonce inside the client cookie in GoogleCallback()
-	return userInfo.Email, idToken.Nonce, nil
-
 }
 
 func (db *DB) Auth(username, password string) bool {
@@ -1183,32 +869,32 @@ func (db *DB) dbInit() {
 
 //UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func (db *DB) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
 
-		givenToken := db.ReadRegisterKey(w, r)
+		givenToken := state.ReadRegisterKey(w, r)
 		log.Println("Given token:", givenToken)
-		isValid, userRole := db.ValidateRegisterToken(givenToken)
+		isValid, userRole := state.ValidateRegisterToken(givenToken)
 
 		if isValid {
 			log.Println("Yay, registration token is valid!")
 			// Delete the token so it cannot be reused
-			db.DeleteRegisterToken(givenToken)
+			state.DeleteRegisterToken(givenToken)
 
-			err := db.newUser(username, password, userRole)
+			err := state.newUser(username, password, userRole)
 			if err != nil {
 				check(err)
-				db.setSession(cookieFlash, "Error adding user. Check logs.", w)
+				state.setSession(cookieFlash, "Error adding user. Check logs.", w)
 				http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
 			}
-			db.setSession(cookieFlash, "Successfully added '"+username+"' user.", w)
+			state.setSession(cookieFlash, "Successfully added '"+username+"' user.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		} else {
-			db.setSession(cookieFlash, "Registration token is invalid.", w)
+			state.setSession(cookieFlash, "Registration token is invalid.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 
@@ -1314,7 +1000,7 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
 // Comparing values with those in BoltDB, and if it passes, stores the verified username in the cookie
 // Note: As opposed to the other Handlers above, now commented out, this one deals with the redirects, so worth handling in the library.
-func (db *DB) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
+func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
@@ -1323,22 +1009,22 @@ func (db *DB) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		password := template.HTMLEscapeString(r.FormValue("password"))
 
 		// Login authentication
-		if db.Auth(username, password) {
-			db.setSession(cookieUser, username, w)
-			db.SetFlash("User '"+username+"' successfully logged in.", w)
+		if state.Auth(username, password) {
+			state.setSession(cookieUser, username, w)
+			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
 			//redirURL := state.getRedirectFromCookie(r, w)
-			redirURL := db.readSession(cookieRedirect, w, r)
+			redirURL := state.readSession(cookieRedirect, w, r)
 			if redirURL != "" {
 				log.Println("Redirecting to", redirURL)
-				db.clearSession(cookieRedirect, w)
+				state.clearSession(cookieRedirect, w)
 				http.Redirect(w, r, redirURL, http.StatusFound)
 				return
 			}
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		db.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
 		http.Redirect(w, r, LoginPath, http.StatusFound)
 		return
 	case "PUT":
@@ -1348,62 +1034,6 @@ func (db *DB) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Give an error message.
 	}
-}
-
-func (g *GoogleOIDC) GoogleLogin(w http.ResponseWriter, r *http.Request) {
-	// Generate a random string, used for both the "state" and "nonce"
-	randomString := RandString(12)
-	g.SetState(randomString, w)
-
-	// Send request to Google with the random string as the "state" and "nonce"
-	// URL received should have the "state" included in the URL, and nonce should be inside the token
-	url := g.Connectors.Cfg.AuthCodeURL(randomString, oidc.Nonce(randomString))
-	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
-}
-
-func (g *GoogleOIDC) GoogleCallback(w http.ResponseWriter, r *http.Request) {
-
-	cookieState := r.FormValue("state")
-	expectedState := g.ReadState(w, r)
-
-	if cookieState != expectedState {
-		log.Println("state and expectedState do not match.", cookieState, expectedState)
-		g.clearSession(cookieState, w)
-		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-		return
-	}
-
-	code := r.FormValue("code")
-	username, nonce, err := g.VerifyUser(code)
-	if nonce != expectedState {
-		g.clearSession(cookieState, w)
-		log.Println("Nonce does not match!")
-		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-		return
-	}
-	if err != nil {
-		log.Println("Error verifying user:", err)
-		g.clearSession(cookieState, w)
-		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-		return
-	}
-
-	g.SetUsername(username, w)
-
-	// Set the ID token into the "token" securecookie
-	//userstate.SetToken(rawIDToken, w)
-
-	g.SetFlash("User '"+username+"' successfully logged in.", w)
-	// Check if we have a redirect URL in the cookie, if so redirect to it
-	redirURL := g.readSession(cookieRedirect, w, r)
-	if redirURL != "" {
-		log.Println("Redirecting to", redirURL)
-		g.clearSession(cookieRedirect, w)
-		http.Redirect(w, r, redirURL, http.StatusTemporaryRedirect)
-		return
-	}
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
-	return
 }
 
 // GenerateRegisterToken generates a token to register a user, and only a user
