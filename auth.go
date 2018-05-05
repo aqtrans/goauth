@@ -61,10 +61,11 @@ const (
 	roleAdmin = "admin"
 	roleUser  = "user"
 	// Names of cookies used
-	cookieUser     = "user"
-	cookieFlash    = "flash"
-	cookieState    = "state"
-	cookieRedirect = "redirect"
+	cookieUser        = "user"
+	cookieFlash       = "flash"
+	cookieState       = "state"
+	cookieRedirect    = "redirect"
+	cookieRegisterKey = "register"
 
 	errUserDoesNotExist = "User does not exist"
 )
@@ -79,20 +80,21 @@ var (
 // State holds all required info to get authentication working in the app
 type State struct {
 	cookie *securecookie.SecureCookie
+	authBackend
 }
 
 type authBackend interface {
-	Auth(username, password string) bool
-	DoesUserExist(username string) bool
+	//Auth(username, password string) bool
+	//DoesUserExist(username string) bool
 	GetUserInfo(username string) *User
 	getAuthInfo() (hashkey, blockkey []byte)
-	newUser(username, password, role string) error
+	//newUser(username, password, role string) error
 	Userlist() ([]string, error)
-	DeleteUser(username string) error
-	UpdatePass(username string, hash []byte) error
+	//DeleteUser(username string) error
+	//UpdatePass(username string, hash []byte) error
 	// These are very OIDC-specific
-	GetLoginURL(rand string) string
-	VerifyToken(code string) (string, string, error)
+	//GetLoginURL(rand string) string
+	//VerifyToken(code string) (string, string, error)
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -216,9 +218,6 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
 	var theCookie *securecookie.SecureCookie
 
 	g := &GoogleOIDC{
-		State: State{
-			cookie: theCookie,
-		},
 		tomlPath: path,
 		Connectors: oidcConnectors{
 			Provider: provider,
@@ -234,6 +233,10 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
 				Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
 			},
 		},
+	}
+	g.State = State{
+		cookie:      theCookie,
+		authBackend: g,
 	}
 
 	// Load TOML if it exists:
@@ -272,17 +275,21 @@ func NewOIDCAuthState(path, id, secret, redirectURL string) *GoogleOIDC {
 }
 
 // NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
-func NewBoltAuthStateWithDB(db *DB, path string) *State {
+func NewBoltAuthStateWithDB(db *DB, path string) *DB {
 	if path == "" {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
 
 	db.dbInit()
 
-	return &State{
-		authBackend: db,
+	//db.cookie = securecookie.New(db.getAuthInfo())
+
+	db.State = State{
 		cookie:      securecookie.New(db.getAuthInfo()),
+		authBackend: db,
 	}
+
+	return db
 }
 
 // RandBytes generates a random amount of bytes given a specified length
@@ -379,6 +386,19 @@ func (state *State) ReadState(w http.ResponseWriter, r *http.Request) string {
 	// Clear state cookie after it's read
 	state.clearSession(cookieState, w)
 	return theState
+}
+
+// SetRegisterKey sets the register key, for use in registration
+func (state *State) SetRegisterKey(msg string, w http.ResponseWriter) {
+	state.setSession(cookieRegisterKey, msg, w)
+}
+
+// ReadRegisterKey reads the register key
+func (state *State) ReadRegisterKey(w http.ResponseWriter, r *http.Request) string {
+	theKey := state.readSession(cookieRegisterKey, w, r)
+	// Clear register cookie after it's read
+	state.clearSession(cookieRegisterKey, w)
+	return theKey
 }
 
 func (state *State) SetUsername(msg string, w http.ResponseWriter) {
@@ -560,6 +580,7 @@ func (g *GoogleOIDC) saveTOMLTree(tree *toml.Tree) {
 	log.Println(g.tomlPath, "successfully saved.")
 }
 
+/*
 // TODO: Actually get this working!
 func (g *GoogleOIDC) Auth(username, password string) bool {
 	tree := g.getTOMLTree()
@@ -597,6 +618,7 @@ func (g *GoogleOIDC) Auth(username, password string) bool {
 
 	return false
 }
+*/
 
 func (g *GoogleOIDC) DeleteUser(username string) error {
 	tree := g.getTOMLTree()
@@ -613,29 +635,9 @@ func (g *GoogleOIDC) DeleteUser(username string) error {
 }
 
 // DoesUserExist in this case, takes the raw ID token, and verifies it against the Google OIDC endpoint
-func (g *GoogleOIDC) DoesUserExist(username string) bool {
+func (g *GoogleOIDC) DoesUserExistInTOML(username string) bool {
 	// Might reuse this check below at some point, to check if a user has registered before or something?
-	//return t.getTOMLTree().HasPath([]string{"users", username})
-	/*
-		// Parse and verify ID Token payload.
-		idToken, err := g.Connectors.Verifier.Verify(context.Background(), username)
-		if err != nil {
-			log.Println("Error verifying rawIDToken:", err)
-			return false
-		}
-
-		// Extract custom claims
-		var claims oidcClaims
-		if err == nil {
-			if err := idToken.Claims(&claims); err != nil {
-				log.Println("Error extracting claims:", err)
-				return false
-			}
-		}
-		return true
-	*/
-
-	return false
+	return g.getTOMLTree().HasPath([]string{"users", username})
 }
 
 // GetUserInfo verifies a given ID token (retrieved from a cookie more than likely) and unmarshal's the 'claim', picking the email address out
@@ -677,11 +679,6 @@ func (g *GoogleOIDC) GetUserInfo(username string) *User {
 	return user
 }
 
-func (t *GoogleOIDC) UpdatePass(username string, hash []byte) error {
-	// Nothing to do for passwords here
-	return nil
-}
-
 func (t *GoogleOIDC) Userlist() ([]string, error) {
 	tree := t.getTOMLTree().Get("users").(*toml.Tree)
 	return tree.Keys(), nil
@@ -695,7 +692,7 @@ func (t *GoogleOIDC) getAuthInfo() (hashkey, blockkey []byte) {
 	return []byte(hashkeyS), []byte(blockkeyS)
 }
 
-func (t *GoogleOIDC) newUser(username, password, role string) error {
+func (t *GoogleOIDC) newUser(username, role string) error {
 	// Check that the given role is valid before even opening the DB
 	switch role {
 	case roleAdmin, roleUser:
@@ -706,12 +703,6 @@ func (t *GoogleOIDC) newUser(username, password, role string) error {
 	tree := t.getTOMLTree().Get("users").(*toml.Tree)
 	tree.SetPath([]string{"users", username, "role"}, role)
 	return nil
-}
-
-// GetLoginURL takes a (hopefully) randomly generated string and passes it along to AuthCodeURL
-// This random string should be set in the cookie using userstate.SetState(), then read in the callback HTTP handler
-func (g *GoogleOIDC) GetLoginURL(rand string) string {
-	return g.Connectors.Cfg.AuthCodeURL(rand, oidc.Nonce(rand))
 }
 
 func (g *GoogleOIDC) VerifyUser(code string) (string, string, error) {
@@ -763,14 +754,6 @@ func (g *GoogleOIDC) VerifyUser(code string) (string, string, error) {
 	// That nonce is then compared to the nonce inside the client cookie in GoogleCallback()
 	return userInfo.Email, idToken.Nonce, nil
 
-}
-
-func (db *DB) GetLoginURL(rand string) string {
-	return LoginPath
-}
-
-func (db *DB) VerifyUser(code string) (string, string, error) {
-	return "", "", nil
 }
 
 func (db *DB) Auth(username, password string) bool {
@@ -903,13 +886,13 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // NewUser creates a new user with a given plaintext username and password
-func (state *State) NewUser(username, password string) error {
-	return state.newUser(username, password, roleUser)
+func (db *DB) NewUser(username, password string) error {
+	return db.newUser(username, password, roleUser)
 }
 
 // NewAdmin creates a new admin with a given plaintext username and password
-func (state *State) NewAdmin(username, password string) error {
-	return state.newUser(username, password, roleAdmin)
+func (db *DB) NewAdmin(username, password string) error {
+	return db.newUser(username, password, roleAdmin)
 }
 
 // newUser is a dedicated function to create new users, taking plaintext username, password, and role
@@ -1138,9 +1121,26 @@ func (db *DB) dbInit() {
 	defer db.releaseDB()
 
 	err := boltDB.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(userInfoBucketName))
+		registerKeyBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
+		}
+
+		userBucket, err := tx.CreateBucketIfNotExists([]byte(userInfoBucketName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+
+		// Check if no users exist. If so, generate a registration key
+		if userBucket.Stats().KeyN == 0 {
+			log.Println("No users exist. Follow registration URL below to register a new admin user:")
+			token := RandString(12)
+			err = registerKeyBucket.Put([]byte(token), []byte(roleAdmin))
+			if err != nil {
+				check(err)
+				return err
+			}
+			log.Println("Visit your_app.com/register?token=" + token)
 		}
 
 		infobucket, err := tx.CreateBucketIfNotExists([]byte(authInfoBucketName))
@@ -1181,25 +1181,36 @@ func (db *DB) dbInit() {
 	}
 }
 
-/* THIS HANDLER STUFF SHOULD ALL BE TAKEN CARE OF IN THE APPS; LEAVING FOR EXAMPLES:
-
 //UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
-func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
+func (db *DB) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
 		username := template.HTMLEscapeString(r.FormValue("username"))
 		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := state.NewUser(username, password)
-		if err != nil {
-			check(err)
-			state.setSession(cookieFlash, "Error adding user. Check logs.", w)
-			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+
+		givenToken := db.ReadRegisterKey(w, r)
+		log.Println("Given token:", givenToken)
+		isValid, userRole := db.ValidateRegisterToken(givenToken)
+
+		if isValid {
+			log.Println("Yay, registration token is valid!")
+			err := db.newUser(username, password, userRole)
+			if err != nil {
+				check(err)
+				db.setSession(cookieFlash, "Error adding user. Check logs.", w)
+				http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+			}
+			db.setSession(cookieFlash, "Successfully added '"+username+"' user.", w)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		} else {
+			db.setSession(cookieFlash, "Registration token is invalid.", w)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
 		}
-		state.setSession(cookieFlash, "Successfully added '"+username+"' user.", w)
-		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		return
+
 	case "PUT":
 		// Update an existing record.
 	case "DELETE":
@@ -1208,6 +1219,8 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 		// Give an error message.
 	}
 }
+
+/* THIS HANDLER STUFF SHOULD ALL BE TAKEN CARE OF IN THE APPS; LEAVING FOR EXAMPLES:
 
 //AdminUserPassChangePostHandler only handles POST requests, using forms named "username" and "password"
 // Signing up users as necessary, inside the AuthConf
@@ -1300,7 +1313,7 @@ func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
 // Comparing values with those in BoltDB, and if it passes, stores the verified username in the cookie
 // Note: As opposed to the other Handlers above, now commented out, this one deals with the redirects, so worth handling in the library.
-func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
+func (db *DB) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
@@ -1309,22 +1322,22 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 		password := template.HTMLEscapeString(r.FormValue("password"))
 
 		// Login authentication
-		if state.Auth(username, password) {
-			state.setSession(cookieUser, username, w)
-			state.SetFlash("User '"+username+"' successfully logged in.", w)
+		if db.Auth(username, password) {
+			db.setSession(cookieUser, username, w)
+			db.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
 			//redirURL := state.getRedirectFromCookie(r, w)
-			redirURL := state.readSession(cookieRedirect, w, r)
+			redirURL := db.readSession(cookieRedirect, w, r)
 			if redirURL != "" {
 				log.Println("Redirecting to", redirURL)
-				state.clearSession(cookieRedirect, w)
+				db.clearSession(cookieRedirect, w)
 				http.Redirect(w, r, redirURL, http.StatusFound)
 				return
 			}
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+		db.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
 		http.Redirect(w, r, LoginPath, http.StatusFound)
 		return
 	case "PUT":
@@ -1336,55 +1349,114 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (state *State) GoogleLogin(w http.ResponseWriter, r *http.Request) {
-	b := RandString(12)
-	state.SetState(b, w)
+func (g *GoogleOIDC) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	// Generate a random string, used for both the "state" and "nonce"
+	randomString := RandString(12)
+	g.SetState(randomString, w)
 
-	url := state.GetLoginURL(b)
+	// Send request to Google with the random string as the "state" and "nonce"
+	// URL received should have the "state" included in the URL, and nonce should be inside the token
+	url := g.Connectors.Cfg.AuthCodeURL(randomString, oidc.Nonce(randomString))
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
-func (state *State) GoogleCallback(w http.ResponseWriter, r *http.Request) {
+func (g *GoogleOIDC) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 
 	cookieState := r.FormValue("state")
-	expectedState := state.ReadState(w, r)
+	expectedState := g.ReadState(w, r)
 
 	if cookieState != expectedState {
-		log.Println("state and expectedState do not match.", state, expectedState)
-		state.clearSession(cookieState, w)
+		log.Println("state and expectedState do not match.", cookieState, expectedState)
+		g.clearSession(cookieState, w)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
 	code := r.FormValue("code")
-	username, nonce, err := state.VerifyUser(code)
+	username, nonce, err := g.VerifyUser(code)
 	if nonce != expectedState {
-		state.clearSession(cookieState, w)
+		g.clearSession(cookieState, w)
 		log.Println("Nonce does not match!")
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 	if err != nil {
 		log.Println("Error verifying user:", err)
-		state.clearSession(cookieState, w)
+		g.clearSession(cookieState, w)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
-	state.SetUsername(username, w)
+	g.SetUsername(username, w)
 
 	// Set the ID token into the "token" securecookie
 	//userstate.SetToken(rawIDToken, w)
 
-	state.SetFlash("User '"+username+"' successfully logged in.", w)
+	g.SetFlash("User '"+username+"' successfully logged in.", w)
 	// Check if we have a redirect URL in the cookie, if so redirect to it
-	redirURL := state.readSession(cookieRedirect, w, r)
+	redirURL := g.readSession(cookieRedirect, w, r)
 	if redirURL != "" {
 		log.Println("Redirecting to", redirURL)
-		state.clearSession(cookieRedirect, w)
+		g.clearSession(cookieRedirect, w)
 		http.Redirect(w, r, redirURL, http.StatusTemporaryRedirect)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 	return
+}
+
+// GenerateRegisterToken generates a token to register a user, and only a user
+func (db *DB) GenerateRegisterToken(role string) string {
+	switch role {
+	case roleAdmin, roleUser:
+	default:
+		log.Println("GenerateRegisterToken role is invalid: " + role)
+		role = roleUser
+	}
+
+	token := RandString(12)
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	err := boltDB.Update(func(tx *bolt.Tx) error {
+		registerBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		err = registerBucket.Put([]byte(token), []byte(role))
+		if err != nil {
+			check(err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalln("Error putting register token into DB:", err)
+	}
+	return token
+}
+
+func (db *DB) ValidateRegisterToken(token string) (bool, string) {
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	var userRole []byte
+
+	err := boltDB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(registerKeysBucketName))
+		v := b.Get([]byte(token))
+		if v == nil {
+			return errors.New("token does not exist")
+		}
+		userRole = make([]byte, len(v))
+		log.Println("Role:", string(v))
+		copy(userRole, v)
+		return nil
+	})
+	if err != nil {
+		log.Println(err)
+		return false, ""
+	}
+
+	return true, string(userRole)
 }
