@@ -8,18 +8,6 @@
   revision = "9da31745363232bc1e27dbab3569e77383a51585"
 
 [[projects]]
-  branch = "v2"
-  name = "github.com/coreos/go-oidc"
-  packages = ["."]
-  revision = "1180514eaf4d9f38d0d19eef639a1d695e066e72"
-
-[[projects]]
-  name = "github.com/golang/protobuf"
-  packages = ["proto"]
-  revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
-  version = "v1.1.0"
-
-[[projects]]
   branch = "master"
   name = "github.com/gorilla/securecookie"
   packages = ["."]
@@ -30,21 +18,6 @@
   packages = ["."]
   revision = "76626ae9c91c4f2a10f34cad8ce83ea42c93bb75"
   version = "v1.0"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/pelletier/go-toml"
-  packages = ["."]
-  revision = "66540cf1fcd2c3aee6f6787dfa32a6ae9a870f12"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/pquerna/cachecontrol"
-  packages = [
-    ".",
-    "cacheobject"
-  ]
-  revision = "fd225a25f1983d116db58553068677ba03f51fa9"
 
 [[projects]]
   branch = "master"
@@ -62,62 +35,18 @@
   name = "golang.org/x/crypto"
   packages = [
     "bcrypt",
-    "blowfish",
-    "ed25519",
-    "ed25519/internal/edwards25519"
+    "blowfish"
   ]
   revision = "453249f01cfeb54c3d549ddb75ff152ca243f9d8"
-
-[[projects]]
-  branch = "master"
-  name = "golang.org/x/net"
-  packages = [
-    "context",
-    "context/ctxhttp"
-  ]
-  revision = "640f4622ab692b87c2f3a94265e6f579fe38263d"
-
-[[projects]]
-  branch = "master"
-  name = "golang.org/x/oauth2"
-  packages = [
-    ".",
-    "internal"
-  ]
-  revision = "cdc340f7c179dbbfa4afd43b7614e8fcadde4269"
 
 [[projects]]
   name = "golang.org/x/sys"
   packages = ["unix"]
   revision = "99f16d856c9836c42d24e7ab64ea72916925fa97"
 
-[[projects]]
-  name = "google.golang.org/appengine"
-  packages = [
-    "internal",
-    "internal/base",
-    "internal/datastore",
-    "internal/log",
-    "internal/remote_api",
-    "internal/urlfetch",
-    "urlfetch"
-  ]
-  revision = "150dc57a1b433e64154302bdc40b6bb8aefa313a"
-  version = "v1.0.0"
-
-[[projects]]
-  name = "gopkg.in/square/go-jose.v2"
-  packages = [
-    ".",
-    "cipher",
-    "json"
-  ]
-  revision = "76dd09796242edb5b897103a75df2645c028c960"
-  version = "v2.1.6"
-
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ece924df38409eb02e2db3799a957c2d80925f0d16f0e956e10f7acf2c63c35c"
+  inputs-digest = "5765df64e4a54469b6c88eaa0734740ee1190ebab857ca9c7f01d9c03c86f48c"
   solver-name = "gps-cdcl"
   solver-version = 1
