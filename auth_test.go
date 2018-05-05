@@ -375,7 +375,7 @@ func TestRedirect(t *testing.T) {
 	// Attempt a good login
 	w := httptest.NewRecorder()
 	request, err := http.NewRequest("GET", "/index", nil)
-	Redirect(&authState.State, w, request)
+	Redirect(authState, w, request)
 
 	// After a good login, copy Cookie into a new request
 	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
