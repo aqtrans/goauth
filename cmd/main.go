@@ -29,10 +29,7 @@ func main() {
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			//log.Println(args[0], args[1], args[2])
-			authState, err := auth.NewAuthState(boltDB)
-			if err != nil {
-				log.Println(err)
-			}
+			authState := auth.NewAuthState(boltDB)
 			if args[2] == "admin" {
 				authState.NewAdmin(args[0], args[1])
 			}
@@ -47,10 +44,7 @@ func main() {
 		Long:  `List all users in given boltDB.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			//log.Println(args[0], args[1], args[2])
-			authState, err := auth.NewAuthState(boltDB)
-			if err != nil {
-				log.Println(err)
-			}
+			authState := auth.NewAuthState(boltDB)
 			userList, err := authState.Userlist()
 			if err != nil {
 				log.Println(err)
