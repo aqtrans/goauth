@@ -813,6 +813,18 @@ func (db *DB) dbInit() {
 
 		// Check if no users exist. If so, generate a registration key
 		if userBucket.Stats().KeyN == 0 {
+			// Clear all existing register keys, likely due to failed app startups:
+			err := registerKeyBucket.ForEach(func(key, value []byte) error {
+				err := registerKeyBucket.Delete(key)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+
 			log.Println("No users exist. Generating new register key to register a new admin user...")
 			token := randString(12)
 			err = registerKeyBucket.Put([]byte(token), []byte(roleAdmin))
@@ -882,13 +894,14 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 			err := state.newUser(username, password, userRole)
 			if err != nil {
 				check(err)
-				state.setSession(cookieFlash, "Error adding user. Check logs.", w)
+				state.SetFlash("Error adding user. Check logs.", w)
 				http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+				return
 			}
-			state.setSession(cookieFlash, "Successfully added '"+username+"' user.", w)
+			state.SetFlash("Successfully added '"+username+"' user.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		} else {
-			state.setSession(cookieFlash, "Registration token is invalid.", w)
+			state.SetFlash("Registration token is invalid.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		}
 
