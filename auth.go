@@ -166,14 +166,13 @@ func (db *DB) releaseDB() {
 }
 
 // NewBoltAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
-func NewBoltAuthState(path string) *State {
+func NewAuthState(path string) *State {
 	var db *bolt.DB
-
-	return NewBoltAuthStateWithDB(&DB{authdb: db, path: path}, path)
+	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
 // NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
-func NewBoltAuthStateWithDB(db *DB, path string) *State {
+func NewAuthStateWithDB(db *DB, path string) *State {
 	if path == "" {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
@@ -814,14 +813,14 @@ func (db *DB) dbInit() {
 
 		// Check if no users exist. If so, generate a registration key
 		if userBucket.Stats().KeyN == 0 {
-			log.Println("No users exist. Follow registration URL below to register a new admin user:")
+			log.Println("No users exist. Generating new register key to register a new admin user...")
 			token := randString(12)
 			err = registerKeyBucket.Put([]byte(token), []byte(roleAdmin))
 			if err != nil {
 				check(err)
 				return err
 			}
-			log.Println("Visit your_app.com/register?token=" + token)
+			log.Println("Use this register key on your signup page: " + token)
 		}
 
 		infobucket, err := tx.CreateBucketIfNotExists([]byte(authInfoBucketName))
@@ -862,16 +861,16 @@ func (db *DB) dbInit() {
 	}
 }
 
-//UserSignupPostHandler only handles POST requests, using forms named "username" and "password"
+//UserSignupPostHandler only handles POST requests, using forms named "username", "password", and "register_key"
 // Signing up users as necessary, inside the AuthConf
 func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+		givenToken := r.FormValue("register_key")
 
-		givenToken := state.ReadRegisterKey(w, r)
 		log.Println("Given token:", givenToken)
 		isValid, userRole := state.ValidateRegisterToken(givenToken)
 
