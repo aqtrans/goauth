@@ -165,13 +165,13 @@ func (db *DB) releaseDB() {
 	}
 }
 
-// NewBoltAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
+// NewAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
 func NewAuthState(path string) *State {
 	var db *bolt.DB
 	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path)
 }
 
-// NewBoltAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
+// NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
 func NewAuthStateWithDB(db *DB, path string) *State {
 	if path == "" {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
