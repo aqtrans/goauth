@@ -101,6 +101,8 @@ type flash struct {
 	Msg string
 }
 
+type envMiddleHit bool
+
 // If Debug is set to true, this logs to Stderr
 func debugln(v ...interface{}) {
 	if Debug {
@@ -382,6 +384,9 @@ func GetUserState(c context.Context) *User {
 	if ok {
 		return userC
 	}
+	if !checkContext(c) {
+		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
+	}
 	/*
 		if !ok {
 			debugln("No UserState in context.")
@@ -406,7 +411,22 @@ func GetFlash(c context.Context) string {
 	if ok {
 		flash = t.Msg
 	}
+	if !checkContext(c) {
+		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
+	}
 	return flash
+}
+
+func newCheckInContext(c context.Context) context.Context {
+	return context.WithValue(c, ChkKey, true)
+}
+
+func checkContext(c context.Context) bool {
+	_, ok := c.Value(ChkKey).(*envMiddleHit)
+	if ok {
+		return true
+	}
+	return false
 }
 
 // IsAdmin checks if the given user is an admin
@@ -765,7 +785,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		newc := r.Context()
 
 		// Add a little flag to tell whether this middleware has been hit
-		//newc = newChkContext(newc)
+		newc = newCheckInContext(newc)
 
 		if username != "" {
 			newc = state.NewUserInContext(newc, username)
