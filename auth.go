@@ -97,10 +97,6 @@ type User struct {
 	Role     string
 }
 
-type flash struct {
-	Msg string
-}
-
 type envMiddleHit bool
 
 // If Debug is set to true, this logs to Stderr
@@ -230,12 +226,13 @@ func userFromContext(c context.Context) (*User, bool) {
 	return u, ok
 }
 
-func (f *flash) NewFlashInContext(c context.Context) context.Context {
+// NewFlashInContext adds a given string as a flash message in the context
+func NewFlashInContext(c context.Context, f string) context.Context {
 	return context.WithValue(c, MsgKey, f)
 }
 
-func flashFromContext(c context.Context) (*flash, bool) {
-	f, ok := c.Value(MsgKey).(*flash)
+func flashFromContext(c context.Context) (string, bool) {
+	f, ok := c.Value(MsgKey).(string)
 	return f, ok
 }
 
@@ -409,7 +406,7 @@ func GetFlash(c context.Context) string {
 		flash = ""
 	}
 	if ok {
-		flash = t.Msg
+		flash = t
 	}
 	if !checkContext(c) {
 		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
@@ -792,10 +789,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		}
 
 		if message != "" {
-			f := &flash{
-				Msg: message,
-			}
-			newc = f.NewFlashInContext(newc)
+			newc = NewFlashInContext(newc, message)
 		}
 
 		next.ServeHTTP(w, r.WithContext(newc))
