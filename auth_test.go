@@ -126,14 +126,12 @@ func TestContext(t *testing.T) {
 		t.Error("userC2.username does not equal admin")
 	}
 
-	f := &flash{
-		Msg: "message",
-	}
-	ctx = f.NewFlashInContext(ctx)
+	f := "message"
+	ctx = NewFlashInContext(ctx, f)
 
 	msgC := GetFlash(ctx)
-	if msgC != f.Msg {
-		t.Error("msgC does not equal f.Msg")
+	if msgC != f {
+		t.Error("msgC does not equal f")
 	}
 
 }
