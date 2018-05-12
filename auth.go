@@ -90,14 +90,18 @@ type authInfo struct {
 	blockKey []byte
 }
 
-// User is what is stored inside the boltDB, and also returned and stored inside the context
-type User struct {
+// boltUser is what is stored inside the boltDB
+type boltUser struct {
 	Name     string
 	Password []byte
 	Role     string
 }
 
-type envMiddleHit bool
+// User is what is stored inside the context; basically boltUser minus the password, so the password is not passed around and potentially leaked
+type User struct {
+	Name string
+	Role string
+}
 
 // If Debug is set to true, this logs to Stderr
 func debugln(v ...interface{}) {
@@ -419,7 +423,7 @@ func newCheckInContext(c context.Context) context.Context {
 }
 
 func checkContext(c context.Context) bool {
-	_, ok := c.Value(ChkKey).(*envMiddleHit)
+	_, ok := c.Value(ChkKey).(bool)
 	if ok {
 		return true
 	}
@@ -451,7 +455,7 @@ func (db *DB) Auth(username, password string) bool {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
-	var u *User
+	var u *boltUser
 	// Grab given user's password from Bolt
 	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
@@ -605,7 +609,7 @@ func (db *DB) newUser(username, password, role string) error {
 		return err
 	}
 
-	u := &User{
+	u := &boltUser{
 		Name:     username,
 		Password: hash,
 		Role:     role,
@@ -698,7 +702,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 			return errors.New(errUserDoesNotExist)
 		}
 
-		var u *User
+		var u *boltUser
 		err := json.Unmarshal(userbucketUser, &u)
 		if err != nil {
 			check(err)
