@@ -593,3 +593,13 @@ func TestAuthAdminMiddle2(t *testing.T) {
 		}
 	*/
 }
+
+func BenchmarkNewUser(b *testing.B) {
+	tmpdb := tempfile()
+	authState := NewAuthState(tmpdb)
+	defer os.Remove(tmpdb)
+
+	for i := 0; i < b.N; i++ {
+		authState.NewUser("user", "12345")
+	}
+}
