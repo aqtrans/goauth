@@ -21,9 +21,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	"log"
 	"net/http"
 	"os"
@@ -90,6 +90,7 @@ type authInfo struct {
 	blockKey []byte
 }
 
+/*
 // boltUser is what is stored inside the boltDB
 type boltUser struct {
 	Name     string
@@ -102,6 +103,7 @@ type User struct {
 	Name string
 	Role string
 }
+*/
 
 // If Debug is set to true, this logs to Stderr
 func debugln(v ...interface{}) {
@@ -433,7 +435,7 @@ func checkContext(c context.Context) bool {
 // IsAdmin checks if the given user is an admin
 func (u *User) IsAdmin() bool {
 	if u != nil {
-		if u.Role == roleAdmin {
+		if u.Role == User_admin {
 			return true
 		}
 	}
@@ -441,6 +443,7 @@ func (u *User) IsAdmin() bool {
 	return false
 }
 
+/*
 // GetName returns the user's Name
 func (u *User) GetName() string {
 	if u != nil {
@@ -448,6 +451,7 @@ func (u *User) GetName() string {
 	}
 	return ""
 }
+*/
 
 // Auth authenticates a given username and password
 func (db *DB) Auth(username, password string) bool {
@@ -455,7 +459,7 @@ func (db *DB) Auth(username, password string) bool {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
-	var u *boltUser
+	var u User
 	// Grab given user's password from Bolt
 	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName))
@@ -464,7 +468,7 @@ func (db *DB) Auth(username, password string) bool {
 			return errors.New(errUserDoesNotExist)
 		}
 
-		err := json.Unmarshal(v, &u)
+		err := proto.Unmarshal(v, &u)
 		if err != nil {
 			check(err)
 			return err
@@ -512,7 +516,7 @@ func (db *DB) DoesUserExist(username string) bool {
 
 // GetUserInfo gets a *User from the DB
 func (db *DB) getUserInfo(username string) *User {
-	var u *User
+	var u User
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
@@ -522,7 +526,7 @@ func (db *DB) getUserInfo(username string) *User {
 		if v == nil {
 			return errors.New(errUserDoesNotExist)
 		}
-		err := json.Unmarshal(v, &u)
+		err := proto.Unmarshal(v, &u)
 		if err != nil {
 			check(err)
 			return err
@@ -533,7 +537,7 @@ func (db *DB) getUserInfo(username string) *User {
 		check(err)
 		return nil
 	}
-	return u
+	return &u
 
 	/*
 		s := &Shorturl{
@@ -595,9 +599,8 @@ func (db *DB) NewAdmin(username, password string) error {
 func (db *DB) newUser(username, password, role string) error {
 
 	// Check that the given role is valid before even opening the DB
-	switch role {
-	case roleAdmin, roleUser:
-	default:
+	roleEnum, ok := User_Role_value[role]
+	if !ok {
 		return errors.New("NewUser role is invalid: " + role)
 	}
 
@@ -609,13 +612,13 @@ func (db *DB) newUser(username, password, role string) error {
 		return err
 	}
 
-	u := &boltUser{
+	u := &User{
 		Name:     username,
 		Password: hash,
-		Role:     role,
+		Role:     User_Role(roleEnum),
 	}
 
-	userEncoded, err := json.Marshal(u)
+	userEncoded, err := proto.Marshal(u)
 	if err != nil {
 		check(err)
 		return err
@@ -702,8 +705,8 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 			return errors.New(errUserDoesNotExist)
 		}
 
-		var u *boltUser
-		err := json.Unmarshal(userbucketUser, &u)
+		var u User
+		err := proto.Unmarshal(userbucketUser, &u)
 		if err != nil {
 			check(err)
 			return err
@@ -711,7 +714,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 
 		u.Password = hash
 
-		encoded, err := json.Marshal(u)
+		encoded, err := proto.Marshal(&u)
 		if err != nil {
 			log.Println(err)
 			return err
