@@ -1035,7 +1035,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Login authentication
 		if state.Auth(username, password) {
-			state.setSession(cookieUser, username, w)
+			state.SetUsername(username, w)
 			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
 			//redirURL := state.getRedirectFromCookie(r, w)
@@ -1043,14 +1043,14 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			if redirURL != "" {
 				log.Println("Redirecting to", redirURL)
 				state.clearSession(cookieRedirect, w)
-				http.Redirect(w, r, redirURL, http.StatusFound)
+				http.Redirect(w, r, redirURL, http.StatusSeeOther)
 				return
 			}
-			http.Redirect(w, r, "/", http.StatusFound)
+			http.Redirect(w, r, "/index", http.StatusSeeOther)
 			return
 		}
 		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
-		http.Redirect(w, r, LoginPath, http.StatusFound)
+		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 		return
 	case "PUT":
 		// Update an existing record.
