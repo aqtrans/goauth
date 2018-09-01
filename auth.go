@@ -23,17 +23,14 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"github.com/golang/protobuf/proto"
 	"log"
 	"net/http"
 	"os"
 	"runtime"
-	"text/template"
-
-	//"text/template"
 	"time"
 
 	"github.com/boltdb/bolt"
+	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/securecookie"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -1033,8 +1030,8 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 	case "POST":
 		// Handle login POST request
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
+		username := r.FormValue("username")
+		password := r.FormValue("password")
 
 		// Login authentication
 		if state.Auth(username, password) {
