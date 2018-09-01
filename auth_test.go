@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+
 	//"net/url"
 	"os"
 	"testing"
@@ -209,7 +210,7 @@ func TestSuccessfulLogin(t *testing.T) {
 
 	//t.Log(w.HeaderMap["Set-Cookie"])
 
-	if w.Header().Get("Location") != "/" {
+	if w.Header().Get("Location") != "/index" {
 		t.Log(w.HeaderMap)
 		t.Log(authState.readSession("flash", w, request))
 		t.Error("Successful login was not redirected to /")
