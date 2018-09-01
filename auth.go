@@ -108,7 +108,7 @@ func debugln(v ...interface{}) {
 		var buf bytes.Buffer
 		debuglogger := log.New(&buf, "Debug: ", log.Ltime)
 		debuglogger.SetOutput(os.Stderr)
-		debuglogger.Print(v)
+		debuglogger.Print(v...)
 	}
 }
 
