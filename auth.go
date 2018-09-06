@@ -73,7 +73,7 @@ var (
 // State holds all required info to get authentication working in the app
 type State struct {
 	cookie *securecookie.SecureCookie
-	DB
+	backend
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -90,8 +90,8 @@ type authInfo struct {
 type backend interface {
 	Auth(username, password string) bool
 	UserExists(username string) bool
-	getUserInfo(username string) bool
-	getauthInfo() authInfo
+	getUserInfo(username string) *User
+	getAuthInfo() authInfo
 	NewUser(username, password string) error
 	NewAdmin(username, password string) error
 	newUser(username, password, role string) error
@@ -200,8 +200,8 @@ func NewAuthStateWithDB(db *DB, path string) *State {
 	cookieKeys := db.getAuthInfo()
 
 	return &State{
-		cookie: securecookie.New(cookieKeys.hashKey, cookieKeys.blockKey),
-		DB:     *db,
+		cookie:  securecookie.New(cookieKeys.hashKey, cookieKeys.blockKey),
+		backend: *db,
 	}
 }
 
@@ -470,7 +470,7 @@ func (u *User) GetName() string {
 */
 
 // Auth authenticates a given username and password
-func (db *DB) Auth(username, password string) bool {
+func (db DB) Auth(username, password string) bool {
 
 	boltdb := db.getDB()
 	defer db.releaseDB()
@@ -507,8 +507,12 @@ func (db *DB) Auth(username, password string) bool {
 	return true
 }
 
+func (db DB) UserExists(username string) bool {
+	return db.DoesUserExist(username)
+}
+
 // DoesUserExist checks if user actually exists in the DB
-func (db *DB) DoesUserExist(username string) bool {
+func (db DB) DoesUserExist(username string) bool {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
@@ -531,7 +535,7 @@ func (db *DB) DoesUserExist(username string) bool {
 }
 
 // GetUserInfo gets a *User from the DB
-func (db *DB) getUserInfo(username string) *User {
+func (db DB) getUserInfo(username string) *User {
 	var u User
 	boltdb := db.getDB()
 	defer db.releaseDB()
@@ -573,7 +577,7 @@ func (db *DB) getUserInfo(username string) *User {
 
 }
 
-func (db *DB) getAuthInfo() authInfo {
+func (db DB) getAuthInfo() authInfo {
 	boltDB := db.getDB()
 	defer db.releaseDB()
 
@@ -607,18 +611,18 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // NewUser creates a new user with a given plaintext username and password
-func (db *DB) NewUser(username, password string) error {
+func (db DB) NewUser(username, password string) error {
 	return db.newUser(username, password, roleUser)
 }
 
 // NewAdmin creates a new admin with a given plaintext username and password
-func (db *DB) NewAdmin(username, password string) error {
+func (db DB) NewAdmin(username, password string) error {
 	return db.newUser(username, password, roleAdmin)
 }
 
 // newUser is a dedicated function to create new users, taking plaintext username, password, and role
 //  Hashing done in this function, no need to do it before
-func (db *DB) newUser(username, password, role string) error {
+func (db DB) newUser(username, password, role string) error {
 
 	// Check that the given role is valid before even opening the DB
 	roleEnum, ok := User_Role_value[role]
@@ -675,7 +679,7 @@ func (db *DB) newUser(username, password, role string) error {
 }
 
 // Userlist lists all users in the DB
-func (db *DB) Userlist() ([]string, error) {
+func (db DB) Userlist() ([]string, error) {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
@@ -697,7 +701,7 @@ func (db *DB) Userlist() ([]string, error) {
 }
 
 // DeleteUser deletes a given user from the DB
-func (db *DB) DeleteUser(username string) error {
+func (db DB) DeleteUser(username string) error {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
@@ -713,7 +717,7 @@ func (db *DB) DeleteUser(username string) error {
 
 // UpdatePass updates a given user's password to the given hash
 // Password hashing must be done by the caller
-func (db *DB) UpdatePass(username string, hash []byte) error {
+func (db DB) UpdatePass(username string, hash []byte) error {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
@@ -839,7 +843,11 @@ func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 }
 */
 
-func (db *DB) dbInit() {
+func (db DB) init() {
+	db.dbInit()
+}
+
+func (db DB) dbInit() {
 	boltDB := db.getDB()
 	defer db.releaseDB()
 
@@ -1087,7 +1095,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GenerateRegisterToken generates a token to register a user, and only a user
-func (db *DB) GenerateRegisterToken(role string) string {
+func (db DB) GenerateRegisterToken(role string) string {
 	switch role {
 	case roleAdmin, roleUser:
 	default:
@@ -1118,7 +1126,7 @@ func (db *DB) GenerateRegisterToken(role string) string {
 }
 
 // ValidateRegisterToken validates that a given registration token is valid, exists inside the DB
-func (db *DB) ValidateRegisterToken(token string) (bool, string) {
+func (db DB) ValidateRegisterToken(token string) (bool, string) {
 	boltDB := db.getDB()
 	defer db.releaseDB()
 
@@ -1144,7 +1152,7 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 }
 
 // DeleteRegisterToken deletes a registration token
-func (db *DB) DeleteRegisterToken(token string) {
+func (db DB) DeleteRegisterToken(token string) {
 	boltDB := db.getDB()
 	defer db.releaseDB()
 

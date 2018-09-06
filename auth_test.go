@@ -46,7 +46,7 @@ func TestBolt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !authState.DoesUserExist("adminTest") {
+	if !authState.UserExists("adminTest") {
 		t.Fatal("ERR: adminTest user does not exist in authState!")
 	}
 	if !authState.Auth("adminTest", "test") {
@@ -80,7 +80,7 @@ func TestBolt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authState.DoesUserExist("adminTest") {
+	if authState.UserExists("adminTest") {
 		t.Fatal("ERR: adminTest user exists after deleting!")
 	}
 }
