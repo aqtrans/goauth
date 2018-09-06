@@ -87,6 +87,23 @@ type authInfo struct {
 	blockKey []byte
 }
 
+type backend interface {
+	Auth(username, password string) bool
+	UserExists(username string) bool
+	getUserInfo(username string) bool
+	getauthInfo() authInfo
+	NewUser(username, password string) error
+	NewAdmin(username, password string) error
+	newUser(username, password, role string) error
+	DeleteUser(username string) error
+	UpdatePass(username string, hash []byte) error
+	Userlist() ([]string, error)
+	init()
+	GenerateRegisterToken(role string) string
+	ValidateRegisterToken(token string) (bool, string)
+	DeleteRegisterToken(token string)
+}
+
 /*
 // boltUser is what is stored inside the boltDB
 type boltUser struct {
@@ -180,8 +197,10 @@ func NewAuthStateWithDB(db *DB, path string) *State {
 
 	db.dbInit()
 
+	cookieKeys := db.getAuthInfo()
+
 	return &State{
-		cookie: securecookie.New(db.getAuthInfo()),
+		cookie: securecookie.New(cookieKeys.hashKey, cookieKeys.blockKey),
 		DB:     *db,
 	}
 }
@@ -554,9 +573,12 @@ func (db *DB) getUserInfo(username string) *User {
 
 }
 
-func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
+func (db *DB) getAuthInfo() authInfo {
 	boltDB := db.getDB()
 	defer db.releaseDB()
+
+	var hashkey []byte
+	var blockkey []byte
 
 	err := boltDB.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(authInfoBucketName))
@@ -570,9 +592,12 @@ func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
 	})
 	if err != nil {
 		check(err)
-		return []byte(""), []byte("")
+		return authInfo{[]byte(""), []byte("")}
 	}
-	return hashkey, blockkey
+	return authInfo{
+		hashKey:  hashkey,
+		blockKey: blockkey,
+	}
 }
 
 // LogoutHandler clears the "user" cookie, logging the user out
