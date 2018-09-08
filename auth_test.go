@@ -111,7 +111,7 @@ func TestContext(t *testing.T) {
 	ctx = authState.NewUserInContext(ctx, "admin")
 
 	user2 := GetUserState(ctx)
-	if user2.GetName() != "admin" {
+	if user2.Name != "admin" {
 		t.Error("username2 from context does not equal admin")
 	}
 	if !user2.IsAdmin() {
@@ -123,7 +123,7 @@ func TestContext(t *testing.T) {
 	}
 
 	userC2 := GetUserState(ctx)
-	if userC2.GetName() != "admin" {
+	if userC2.Name != "admin" {
 		t.Error("userC2.username does not equal admin")
 	}
 
@@ -332,8 +332,8 @@ func TestReadUserInfo(t *testing.T) {
 	if !admin.IsAdmin() {
 		t.Error("admin.IsAdmin() did not return true.")
 	}
-	if admin.GetName() != "admin" {
-		t.Error("admin.GetName() did not return admin.")
+	if admin.Name != "admin" {
+		t.Error("admin.Name did not return admin.")
 	}
 
 	err = authState.NewUser("user", "12345")
@@ -348,8 +348,8 @@ func TestReadUserInfo(t *testing.T) {
 	if user.IsAdmin() {
 		t.Error("user.IsAdmin() did not return false.")
 	}
-	if user.GetName() != "user" {
-		t.Error("user.GetName() did not return user.")
+	if user.Name != "user" {
+		t.Error("user.Name did not return user.")
 	}
 
 	userList, err := authState.Userlist()
