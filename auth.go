@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -82,6 +83,11 @@ type DB struct {
 	path   string
 }
 
+type qlDB struct {
+	authdb *sql.DB
+	path   string
+}
+
 type authInfo struct {
 	hashKey  []byte
 	blockKey []byte
@@ -102,6 +108,26 @@ type backend interface {
 	GenerateRegisterToken(role string) string
 	ValidateRegisterToken(token string) (bool, string)
 	DeleteRegisterToken(token string)
+}
+
+type role int
+
+const (
+	_admin role = 0
+	_user  role = 1
+)
+
+type genUser struct {
+	Name string
+	Role role
+}
+
+func (r role) Admin() bool {
+	return (r == _admin)
+}
+
+func (r role) User() bool {
+	return (r == _user)
 }
 
 /*
