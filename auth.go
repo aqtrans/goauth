@@ -90,6 +90,26 @@ type backend interface {
 	DeleteRegisterToken(token string)
 }
 
+type role int
+
+const (
+	_admin role = 0
+	_user  role = 1
+)
+
+type genUser struct {
+	Name string
+	Role role
+}
+
+func (r role) Admin() bool {
+	return (r == _admin)
+}
+
+func (r role) User() bool {
+	return (r == _user)
+}
+
 /*
 // boltUser is what is stored inside the boltDB
 type boltUser struct {
