@@ -595,6 +595,47 @@ func TestAuthAdminMiddle2(t *testing.T) {
 	*/
 }
 
+func TestRegisterKey(t *testing.T) {
+	tmpdb := tempfile()
+	authState := NewAuthState(tmpdb)
+	defer os.Remove(tmpdb)
+
+	token := authState.GenerateRegisterToken("admin")
+	valid, role := authState.ValidateRegisterToken(token)
+	if !valid {
+		t.Error("Generated register token is not valid.")
+	}
+	if role != "admin" {
+		t.Error("Generated token not reporting as an admin token.")
+	}
+}
+
+func TestUserSignupPostHandler(t *testing.T) {
+	tmpdb := tempfile()
+	authState := NewAuthState(tmpdb)
+	defer os.Remove(tmpdb)
+
+	// Generate a register token
+	token := authState.GenerateRegisterToken("admin")
+
+	// Attempt to signup with the token
+	w := httptest.NewRecorder()
+	request, err := http.NewRequest("POST", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Form = url.Values{}
+	request.Form.Add("username", "admin")
+	request.Form.Add("password", "admin")
+	request.Form.Add("register_key", token)
+
+	authState.UserSignupPostHandler(w, request)
+
+	if w.Code != http.StatusSeeOther {
+		t.Error("HTTP response code after signup is not 303:", w.Code)
+	}
+}
+
 func BenchmarkNewUser(b *testing.B) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
