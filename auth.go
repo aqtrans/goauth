@@ -92,6 +92,13 @@ type User struct {
 	Role string
 }
 
+func (m *User) GetName() string {
+	if m != nil {
+		return m.Name
+	}
+	return ""
+}
+
 // If Debug is set to true, this logs to Stderr
 func debugln(v ...interface{}) {
 	if Debug {
