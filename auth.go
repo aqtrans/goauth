@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -101,6 +102,10 @@ type User struct {
 	Role string
 }
 */
+
+func userBucketName(username string) string {
+	return strings.Join([]string{userInfoBucketName, username}, ":")
+}
 
 // If Debug is set to true, this logs to Stderr
 func debugln(v ...interface{}) {
@@ -609,32 +614,23 @@ func (db *DB) newUser(username, password, role string) error {
 		return err
 	}
 
-	u := &User{
-		Name:     username,
-		Password: hash,
-		Role:     User_Role(roleEnum),
-	}
-
-	userEncoded, err := proto.Marshal(u)
-	if err != nil {
-		check(err)
-		return err
-	}
-
 	boltdb := db.getDB()
 	defer db.releaseDB()
 	//var vb []byte
-	adderr := boltdb.Update(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte("Users"))
+	adderr := boltdb.Batch(func(tx *bolt.Tx) error {
+		userbucket := tx.Bucket([]byte(userBucketName(username)))
 
-		userbucketUser := userbucket.Get([]byte(username))
-
-		// userbucketUser should be nil if user doesn't exist
-		if userbucketUser != nil {
+		// userbucket should be nil if user doesn't exist
+		if userbucket != nil {
 			return errors.New("User already exists")
 		}
 
-		err = userbucket.Put([]byte(username), userEncoded)
+		err = userbucket.Put([]byte("password"), hash)
+		if err != nil {
+			return err
+		}
+		// TODO: get role type switching in here
+		err = userbucket.Put([]byte("role"), hash)
 		if err != nil {
 			return err
 		}
