@@ -53,11 +53,10 @@ const (
 	roleAdmin = "admin"
 	roleUser  = "user"
 	// Names of cookies used
-	cookieUser        = "user"
-	cookieFlash       = "flash"
-	cookieState       = "state"
-	cookieRedirect    = "redirect"
-	cookieRegisterKey = "register"
+	cookieUser     = "user"
+	cookieFlash    = "flash"
+	cookieState    = "state"
+	cookieRedirect = "redirect"
 
 	errUserDoesNotExist = "User does not exist"
 )
@@ -92,9 +91,11 @@ type User struct {
 	Role string
 }
 
-func (m *User) GetName() string {
-	if m != nil {
-		return m.Name
+// GetName is a helper function that sets the user blank if User is nil
+// This allows use in Templates and the like
+func (u *User) GetName() string {
+	if u != nil {
+		return u.Name
 	}
 	return ""
 }
@@ -269,27 +270,9 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession(cookieFlash, msg, w)
 }
 
-// SetRegisterKey sets the register key, for use in registration
-func (state *State) SetRegisterKey(msg string, w http.ResponseWriter) {
-	state.setSession(cookieRegisterKey, msg, w)
-}
-
-// ReadRegisterKey reads the register key
-func (state *State) ReadRegisterKey(w http.ResponseWriter, r *http.Request) string {
-	theKey := state.readSession(cookieRegisterKey, w, r)
-	// Clear register cookie after it's read
-	state.clearSession(cookieRegisterKey, w)
-	return theKey
-}
-
 // SetUsername sets the username into the cookie
 func (state *State) SetUsername(msg string, w http.ResponseWriter) {
 	state.setSession(cookieUser, msg, w)
-}
-
-// ReadUsername reads the username from the cookie
-func (state *State) ReadUsername(w http.ResponseWriter, r *http.Request) string {
-	return state.readSession(cookieUser, w, r)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -724,7 +707,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
 			log.Println(user.Name + " attempting to access " + r.URL.Path)
-			state.setSession(cookieFlash, "Sorry, you are not allowed to see that.", w)
+			state.SetFlash("Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -870,14 +853,14 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 			if err != nil {
 				check(err)
 				state.SetFlash("Error adding user. Check logs.", w)
-				http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+				http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 				return
 			}
 			state.SetFlash("Successfully added '"+username+"' user.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		} else {
 			state.SetFlash("Registration token is invalid.", w)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.Redirect(w, r, "/", http.StatusInternalServerError)
 		}
 
 	case "PUT":
@@ -1007,7 +990,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
-		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
+		http.Redirect(w, r, LoginPath, http.StatusInternalServerError)
 		return
 	case "PUT":
 		// Update an existing record.
