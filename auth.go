@@ -27,11 +27,9 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/boltdb/bolt"
-	"github.com/golang/protobuf/proto"
 	"github.com/gorilla/securecookie"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -88,23 +86,10 @@ type authInfo struct {
 	blockKey []byte
 }
 
-/*
-// boltUser is what is stored inside the boltDB
-type boltUser struct {
-	Name     string
-	Password []byte
-	Role     string
-}
-
-// User is what is stored inside the context; basically boltUser minus the password, so the password is not passed around and potentially leaked
+// User is what is stored inside the context
 type User struct {
 	Name string
 	Role string
-}
-*/
-
-func userBucketName(username string) string {
-	return strings.Join([]string{userInfoBucketName, username}, ":")
 }
 
 // If Debug is set to true, this logs to Stderr
@@ -149,6 +134,15 @@ func (state *State) releaseDB() {
 	}
 }
 */
+
+func validRole(role string) bool {
+	switch role {
+	case roleAdmin, roleUser:
+		return true
+	default:
+		return false
+	}
+}
 
 func (db *DB) getDB() *bolt.DB {
 	//var authDB *bolt.DB
@@ -437,7 +431,7 @@ func checkContext(c context.Context) bool {
 // IsAdmin checks if the given user is an admin
 func (u *User) IsAdmin() bool {
 	if u != nil {
-		if u.Role == User_admin {
+		if u.Role == roleAdmin {
 			return true
 		}
 	}
@@ -461,21 +455,15 @@ func (db *DB) Auth(username, password string) bool {
 	boltdb := db.getDB()
 	defer db.releaseDB()
 
-	var u User
 	// Grab given user's password from Bolt
 	err := boltdb.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(userInfoBucketName))
-		v := b.Get([]byte(username))
-		if v == nil {
+		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
+		if b == nil {
 			return errors.New(errUserDoesNotExist)
 		}
+		v := b.Get([]byte("password"))
 
-		err := proto.Unmarshal(v, &u)
-		if err != nil {
-			check(err)
-			return err
-		}
-		err = CheckPasswordHash(u.Password, []byte(password))
+		err := CheckPasswordHash(v, []byte(password))
 		if err != nil {
 			// Incorrect password, malformed hash, etc.
 			debugln("error verifying password for user", username, err)
@@ -499,9 +487,8 @@ func (db *DB) DoesUserExist(username string) bool {
 	defer db.releaseDB()
 
 	err := boltdb.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(userInfoBucketName))
-		v := b.Get([]byte(username))
-		if v == nil {
+		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
+		if b == nil {
 			return errors.New(errUserDoesNotExist)
 		}
 		return nil
@@ -523,16 +510,14 @@ func (db *DB) getUserInfo(username string) *User {
 	defer db.releaseDB()
 
 	err := boltdb.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(userInfoBucketName))
-		v := b.Get([]byte(username))
-		if v == nil {
+		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
+		if b == nil {
 			return errors.New(errUserDoesNotExist)
 		}
-		err := proto.Unmarshal(v, &u)
-		if err != nil {
-			check(err)
-			return err
-		}
+		v := b.Get([]byte("role"))
+		u.Role = string(v)
+		u.Name = username
+
 		return nil
 	})
 	if err != nil {
@@ -540,22 +525,6 @@ func (db *DB) getUserInfo(username string) *User {
 		return nil
 	}
 	return &u
-
-	/*
-		s := &Shorturl{
-			Created: shorturl.Created,
-			Short:   shorturl.Short,
-			Long:    shorturl.Long,
-			Hits:    shorturl.Hits + 1,
-		}
-		encoded, err := json.Marshal(s)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-
-		return b.Put([]byte(title), encoded)
-	*/
 
 }
 
@@ -601,8 +570,7 @@ func (db *DB) NewAdmin(username, password string) error {
 func (db *DB) newUser(username, password, role string) error {
 
 	// Check that the given role is valid before even opening the DB
-	roleEnum, ok := User_Role_value[role]
-	if !ok {
+	if !validRole(role) {
 		return errors.New("NewUser role is invalid: " + role)
 	}
 
@@ -618,19 +586,22 @@ func (db *DB) newUser(username, password, role string) error {
 	defer db.releaseDB()
 	//var vb []byte
 	adderr := boltdb.Batch(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte(userBucketName(username)))
-
+		userbucket := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		// userbucket should be nil if user doesn't exist
 		if userbucket != nil {
 			return errors.New("User already exists")
+		}
+		userbucket, err = tx.Bucket([]byte(userInfoBucketName)).CreateBucket([]byte(username))
+		if err != nil {
+			return err
 		}
 
 		err = userbucket.Put([]byte("password"), hash)
 		if err != nil {
 			return err
 		}
-		// TODO: get role type switching in here
-		err = userbucket.Put([]byte("role"), hash)
+
+		err = userbucket.Put([]byte("role"), []byte(role))
 		if err != nil {
 			return err
 		}
@@ -674,7 +645,7 @@ func (db *DB) DeleteUser(username string) error {
 
 	err := boltdb.Update(func(tx *bolt.Tx) error {
 		log.Println(username + " has been deleted")
-		return tx.Bucket([]byte(userInfoBucketName)).Delete([]byte(username))
+		return tx.Bucket([]byte(userInfoBucketName)).DeleteBucket([]byte(username))
 	})
 	if err != nil {
 		return err
@@ -690,30 +661,13 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 
 	// Update password only if user exists
 	err := boltdb.Update(func(tx *bolt.Tx) error {
-		userbucket := tx.Bucket([]byte(userInfoBucketName))
-		userbucketUser := userbucket.Get([]byte(username))
-
-		// userbucketUser should be nil if user doesn't exist
-		if userbucketUser == nil {
+		userbucket := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
+		// userbucket should be nil if user doesn't exist
+		if userbucket == nil {
 			return errors.New(errUserDoesNotExist)
 		}
 
-		var u User
-		err := proto.Unmarshal(userbucketUser, &u)
-		if err != nil {
-			check(err)
-			return err
-		}
-
-		u.Password = hash
-
-		encoded, err := proto.Marshal(&u)
-		if err != nil {
-			log.Println(err)
-			return err
-		}
-
-		err = userbucket.Put([]byte(username), encoded)
+		err := userbucket.Put([]byte("password"), hash)
 		if err != nil {
 			return err
 		}
@@ -762,7 +716,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		}
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
-			log.Println(user.GetName() + " attempting to access " + r.URL.Path)
+			log.Println(user.Name + " attempting to access " + r.URL.Path)
 			state.setSession(cookieFlash, "Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
