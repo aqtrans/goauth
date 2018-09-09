@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	"github.com/boltdb/bolt"
+	"github.com/gorilla/csrf"
 	"github.com/gorilla/securecookie"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -47,6 +49,7 @@ const (
 	authInfoBucketName     = "AuthInfo"
 	hashKeyName            = "HashKey"
 	blockKeyName           = "BlockKey"
+	csrfKeyName            = "CSRFKey"
 	userInfoBucketName     = "Users"
 	registerKeysBucketName = "RegisterKeys"
 	// Available roles for users
@@ -824,6 +827,19 @@ func (db *DB) dbInit() {
 			}
 		}
 
+		csrfKey := infobucket.Get([]byte(csrfKeyName))
+		if csrfKey == nil {
+			debugln("Throwing csrfKey into auth.db.")
+			// Generate a random csrfKey
+			csrfKey := randBytes(32)
+
+			err = infobucket.Put([]byte(csrfKeyName), csrfKey)
+			if err != nil {
+				check(err)
+				return err
+			}
+		}
+
 		return nil
 	})
 	if err != nil {
@@ -1078,4 +1094,34 @@ func (db *DB) DeleteRegisterToken(token string) {
 	if err != nil {
 		log.Fatalln("Error putting register token into DB:", err)
 	}
+}
+
+func (db *DB) getCSRFKey() []byte {
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	var csrfKey []byte
+
+	err := boltDB.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(authInfoBucketName))
+		v1 := b.Get([]byte(csrfKeyName))
+		csrfKey = make([]byte, len(v1))
+		copy(csrfKey, v1)
+		return nil
+	})
+	if err != nil {
+		log.Println("ERROR: CSRF token not found in authdb. CSRF protection will not work.")
+		return []byte("")
+	}
+	return csrfKey
+}
+
+// CSRFProtect wraps gorilla/csrf.Protect, only allowing toggling the Secure option
+func (state *State) CSRFProtect(secure bool) func(http.Handler) http.Handler {
+	return csrf.Protect(state.getCSRFKey(), csrf.Secure(secure))
+}
+
+// CSRFTemplateField wraps gorilla/csrf.TemplateField
+func (state *State) CSRFTemplateField(r *http.Request) template.HTML {
+	return csrf.TemplateField(r)
 }
