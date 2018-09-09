@@ -1122,6 +1122,6 @@ func (state *State) CSRFProtect(secure bool) func(http.Handler) http.Handler {
 }
 
 // CSRFTemplateField wraps gorilla/csrf.TemplateField
-func (state *State) CSRFTemplateField(r *http.Request) template.HTML {
+func CSRFTemplateField(r *http.Request) template.HTML {
 	return csrf.TemplateField(r)
 }
