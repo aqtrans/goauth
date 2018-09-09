@@ -2,10 +2,11 @@ package main
 
 import (
 	//"flag"
+
 	"log"
 
+	"git.jba.io/go/auth"
 	"github.com/spf13/cobra"
-	"jba.io/go/auth"
 )
 
 func main() {
@@ -32,9 +33,10 @@ func main() {
 			authState := auth.NewAuthState(boltDB)
 			if args[2] == "admin" {
 				authState.NewAdmin(args[0], args[1])
-			}
-			if args[2] == "user" {
+			} else if args[2] == "user" {
 				authState.NewUser(args[0], args[1])
+			} else {
+				log.Fatalln("Invalid role. admin or user only.", args[2])
 			}
 		},
 	}
@@ -53,6 +55,23 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(cmdAddUser, cmdListUsers)
+	var cmdGenerateRegistrationKey = &cobra.Command{
+		Use:   "gen [role]",
+		Short: "Generate a registration key",
+		Long:  `Generate a registration key for a user or admin.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			//log.Println(args[0], args[1], args[2])
+			authState := auth.NewAuthState(boltDB)
+			if args[2] == "admin" {
+				authState.GenerateRegisterToken(args[2])
+			} else if args[2] == "user" {
+				authState.GenerateRegisterToken(args[2])
+			} else {
+				log.Fatalln("Invalid role. admin or user only.", args[2])
+			}
+		},
+	}
+
+	rootCmd.AddCommand(cmdAddUser, cmdListUsers, cmdGenerateRegistrationKey)
 	rootCmd.Execute()
 }
