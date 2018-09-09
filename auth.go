@@ -1125,3 +1125,13 @@ func (state *State) CSRFProtect(secure bool) func(http.Handler) http.Handler {
 func CSRFTemplateField(r *http.Request) template.HTML {
 	return csrf.TemplateField(r)
 }
+
+// NewUserToken is a convenient handler that generates and provides a new user registration token
+func (state *State) NewUserToken(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		w.Write([]byte("User token:" + state.GenerateRegisterToken("user")))
+		return
+	default:
+	}
+}
