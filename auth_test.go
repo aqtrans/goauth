@@ -610,6 +610,22 @@ func TestRegisterKey(t *testing.T) {
 	}
 }
 
+func TestRegisterKey2(t *testing.T) {
+	tmpdb := tempfile()
+	authState := NewAuthState(tmpdb)
+	defer os.Remove(tmpdb)
+
+	token := authState.GenerateRegisterToken("Admin")
+	// Test to make sure that invalid roles fallback to user
+	valid, role := authState.ValidateRegisterToken(token)
+	if !valid {
+		t.Error("Generated register token is not valid.")
+	}
+	if role != "user" {
+		t.Error("Generated token not reporting as an user token.")
+	}
+}
+
 func TestUserSignupPostHandler(t *testing.T) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
@@ -633,6 +649,52 @@ func TestUserSignupPostHandler(t *testing.T) {
 
 	if w.Code != http.StatusSeeOther {
 		t.Error("HTTP response code after signup is not 303:", w.Code)
+	}
+}
+
+func TestGetCSRFKey(t *testing.T) {
+	tmpdb := tempfile()
+	authState := NewAuthState(tmpdb)
+	defer os.Remove(tmpdb)
+
+	csrfKey := authState.getCSRFKey()
+	if len(csrfKey) == 0 {
+		t.Error("getCSRFKey returned a 0 length key.")
+	}
+
+	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("omg"))
+	})
+
+	h := authState.CSRFProtect(false)
+	h(test)
+
+	w := httptest.NewRecorder()
+	r, err := http.NewRequest("GET", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	CSRFTemplateField(r)
+	/*
+		if csrf == template.HTML("") {
+			t.Error("CSRFTemplateField is nil")
+		}
+	*/
+
+	authState.NewUserToken(w, r)
+	/*
+		if w.Code != http.StatusFound {
+			t.Error("HTTP response code is not 200.", w.Code)
+		}
+	*/
+}
+
+func TestUserGetName(t *testing.T) {
+	u := &User{}
+	name := u.GetName()
+	if name != "" {
+		t.Error("User.Getname() did not return a blank string.")
 	}
 }
 
