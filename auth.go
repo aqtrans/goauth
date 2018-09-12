@@ -60,15 +60,14 @@ const (
 	cookieFlash    = "flash"
 	cookieState    = "state"
 	cookieRedirect = "redirect"
-
-	errUserDoesNotExist = "User does not exist"
 )
 
 var (
 	// Debug variable can be set to true to have debugging info logged, otherwise silent
 	Debug = false
 	// LoginPath is the path to the login page, used to redirect protected pages
-	LoginPath = "/login"
+	LoginPath           = "/login"
+	errUserDoesNotExist = errors.New("User does not exist")
 )
 
 // State holds all required info to get authentication working in the app
@@ -202,7 +201,7 @@ func randBytes(n int) []byte {
 	_, err := rand.Read(b)
 	// Note that err == nil only if we read len(b) bytes.
 	if err != nil {
-		check(err)
+		log.Fatalln("Error generating random bytes:", err)
 		return nil
 	}
 	return b
@@ -452,7 +451,7 @@ func (db *DB) Auth(username, password string) bool {
 	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		if b == nil {
-			return errors.New(errUserDoesNotExist)
+			return errUserDoesNotExist
 		}
 		v := b.Get([]byte("password"))
 
@@ -482,14 +481,14 @@ func (db *DB) DoesUserExist(username string) bool {
 	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		if b == nil {
-			return errors.New(errUserDoesNotExist)
+			return errUserDoesNotExist
 		}
 		return nil
 	})
 	if err == nil {
 		return true
 	}
-	if err != nil && err != errors.New(errUserDoesNotExist) {
+	if err != nil && err != errUserDoesNotExist {
 		check(err)
 		return false
 	}
@@ -505,7 +504,7 @@ func (db *DB) getUserInfo(username string) *User {
 	err := boltdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		if b == nil {
-			return errors.New(errUserDoesNotExist)
+			return errUserDoesNotExist
 		}
 		v := b.Get([]byte("role"))
 		u.Role = string(v)
@@ -657,7 +656,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 		userbucket := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		// userbucket should be nil if user doesn't exist
 		if userbucket == nil {
-			return errors.New(errUserDoesNotExist)
+			return errUserDoesNotExist
 		}
 
 		err := userbucket.Put([]byte("password"), hash)
@@ -1022,7 +1021,7 @@ func (db *DB) GenerateRegisterToken(role string) string {
 	switch role {
 	case roleAdmin, roleUser:
 	default:
-		log.Println("GenerateRegisterToken role is invalid: " + role)
+		log.Println("GenerateRegisterToken role is invalid, setting to user: " + role)
 		role = roleUser
 	}
 
