@@ -66,7 +66,9 @@ var (
 	// Debug variable can be set to true to have debugging info logged, otherwise silent
 	Debug = false
 	// LoginPath is the path to the login page, used to redirect protected pages
-	LoginPath           = "/login"
+	LoginPath = "/login"
+	// SignupPath is the path to your signup page, used in the initial registration banner
+	SignupPath          = "/signup"
 	errUserDoesNotExist = errors.New("User does not exist")
 )
 
@@ -74,6 +76,7 @@ var (
 type State struct {
 	cookie *securecookie.SecureCookie
 	DB
+	initialRegistrationKey string
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -187,11 +190,12 @@ func NewAuthStateWithDB(db *DB, path string) *State {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
 
-	db.dbInit()
+	key := db.dbInit()
 
 	return &State{
-		cookie: securecookie.New(db.getAuthInfo()),
-		DB:     *db,
+		cookie:                 securecookie.New(db.getAuthInfo()),
+		DB:                     *db,
+		initialRegistrationKey: key,
 	}
 }
 
@@ -725,6 +729,15 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 		username := state.getUsernameFromCookie(r, w)
 		message := state.getFlashFromCookie(r, w)
 
+		// Escape messages here, so the user does not have to
+		//safeMessage := template.HTMLEscapeString(message)
+
+		// If necessary, override safeMessage with a signup link and the initial registration key
+		if state.initialRegistrationKey != "" {
+			log.Println("Initial Registration Token:", state.initialRegistrationKey)
+			message = `<a href="` + SignupPath + `">Signup now!</a> Token: ` + state.initialRegistrationKey
+		}
+
 		newc := r.Context()
 
 		// Add a little flag to tell whether this middleware has been hit
@@ -734,6 +747,7 @@ func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
 			newc = state.NewUserInContext(newc, username)
 		}
 
+		// Continue to depend on whether message was blank, in case HTMLEscapeEstring adds something
 		if message != "" {
 			newc = NewFlashInContext(newc, message)
 		}
@@ -756,9 +770,11 @@ func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
 }
 */
 
-func (db *DB) dbInit() {
+func (db *DB) dbInit() string {
 	boltDB := db.getDB()
 	defer db.releaseDB()
+
+	var newUserKey []byte
 
 	err := boltDB.Update(func(tx *bolt.Tx) error {
 		registerKeyBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
@@ -785,14 +801,18 @@ func (db *DB) dbInit() {
 				return err
 			}
 
-			log.Println("No users exist. Generating new register key to register a new admin user...")
+			//log.Println("No users exist. Generating new register key to register a new admin user...")
 			token := randString(12)
 			err = registerKeyBucket.Put([]byte(token), []byte(roleAdmin))
 			if err != nil {
 				check(err)
 				return err
 			}
-			log.Println("Use this register key on your signup page: " + token)
+			//log.Println("Use this register key on your signup page: " + token)
+
+			// Copy token into newUserKey, to be bubbled up to the app
+			newUserKey = make([]byte, len([]byte(token)))
+			copy(newUserKey, []byte(token))
 		}
 
 		infobucket, err := tx.CreateBucketIfNotExists([]byte(authInfoBucketName))
@@ -844,6 +864,8 @@ func (db *DB) dbInit() {
 	if err != nil {
 		log.Fatalln("Error in dbInit():", err)
 	}
+
+	return string(newUserKey)
 }
 
 //UserSignupPostHandler only handles POST requests, using forms named "username", "password", and "register_key"
@@ -863,6 +885,12 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 			log.Println("Yay, registration token is valid!")
 			// Delete the token so it cannot be reused
 			state.DeleteRegisterToken(givenToken)
+
+			// If given token is the intial registration token, blank it out in the state
+			if givenToken == state.initialRegistrationKey {
+				log.Println("Deleting state.initialRegistrationKey")
+				state.initialRegistrationKey = ""
+			}
 
 			err := state.newUser(username, password, userRole)
 			if err != nil {
