@@ -262,6 +262,7 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 			Value:    encoded,
 			Path:     "/",
 			HttpOnly: true,
+			SameSite: http.SameSiteDefaultMode,
 		}
 		http.SetCookie(w, cookie)
 	} else {
