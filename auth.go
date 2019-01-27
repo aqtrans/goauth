@@ -462,8 +462,6 @@ func (db *DB) Auth(username, password string) bool {
 
 		err := CheckPasswordHash(v, []byte(password))
 		if err != nil {
-			// Incorrect password, malformed hash, etc.
-			debugln("error verifying password for user", username, err)
 			return err
 		}
 		return nil
@@ -471,7 +469,7 @@ func (db *DB) Auth(username, password string) bool {
 
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
-		debugln("error verifying password for user", username, err)
+		debugln("error verifying password for user ", username, err)
 		return false
 	}
 	// TODO: Should look into fleshing this out
@@ -1034,7 +1032,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
-		http.Redirect(w, r, LoginPath, http.StatusInternalServerError)
+		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 		return
 	case "PUT":
 		// Update an existing record.
