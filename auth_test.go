@@ -418,7 +418,7 @@ func TestAuthMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.UserEnvMiddle(authState.AuthMiddle(test))
+	handler := authState.CtxMiddle(authState.AuthMiddle(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == "/login" {
@@ -462,7 +462,7 @@ func TestAuthMiddle2(t *testing.T) {
 	})
 	t.Log(w.HeaderMap)
 
-	handler := authState.UserEnvMiddle(authState.AuthMiddle(test))
+	handler := authState.CtxMiddle(authState.AuthMiddle(test))
 	handler.ServeHTTP(w, request)
 
 	if w.Header().Get("Location") != "/login" {
@@ -515,7 +515,7 @@ func TestAuthAdminMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.UserEnvMiddle(authState.AuthAdminMiddle(test))
+	handler := authState.CtxMiddle(authState.AuthAdminMiddle(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == "/login" {
@@ -571,7 +571,7 @@ func TestAuthAdminMiddle2(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.UserEnvMiddle(authState.AuthAdminMiddle(test))
+	handler := authState.CtxMiddle(authState.AuthAdminMiddle(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") != "/" {
