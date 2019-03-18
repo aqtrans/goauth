@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -84,7 +85,6 @@ func TestBolt(t *testing.T) {
 	}
 }
 
-/*
 func TestContext(t *testing.T) {
 	// Try fetching without anything in the context first
 	ctx := context.Background()
@@ -104,11 +104,11 @@ func TestContext(t *testing.T) {
 	}
 
 	tmpdb := tempfile()
-	state := NewAuthState(tmpdb)
+	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
-	state.NewAdmin("admin", "admin")
+	authState.NewAdmin("admin", "admin")
 
-	ctx = state.NewUserInContext(ctx, "admin")
+	ctx = authState.NewUserInContext(ctx, "admin")
 
 	user2 := GetUserState(ctx)
 	if user2.Name != "admin" {
@@ -136,7 +136,6 @@ func TestContext(t *testing.T) {
 	}
 
 }
-*/
 
 func TestCookies(t *testing.T) {
 
@@ -150,7 +149,7 @@ func TestCookies(t *testing.T) {
 
 	request := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
 
-	if authState.readSession("omg", request) != "testing" {
+	if authState.readSession("omg", w, request) != "testing" {
 		t.Error("Cookie value is unable to be decoded")
 	}
 
@@ -213,7 +212,7 @@ func TestSuccessfulLogin(t *testing.T) {
 
 	if w.Header().Get("Location") != "/index" {
 		t.Log(w.HeaderMap)
-		t.Log(authState.readSession("flash", request))
+		t.Log(authState.readSession("flash", w, request))
 		t.Error("Successful login was not redirected to /")
 	}
 
@@ -302,7 +301,7 @@ func TestReadSession(t *testing.T) {
 	// After a good login, copy Cookie into a new request
 	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
 
-	user := authState.getUsernameFromCookie(request)
+	user := authState.getUsernameFromCookie(request, w)
 	if user != "admin" {
 		t.Error("getUsernameFromCookie did not properly return admin: ", user)
 	}
@@ -419,7 +418,7 @@ func TestAuthMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.AuthMiddle(test)
+	handler := authState.UserEnvMiddle(authState.AuthMiddle(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == "/login" {
@@ -463,7 +462,7 @@ func TestAuthMiddle2(t *testing.T) {
 	})
 	t.Log(w.HeaderMap)
 
-	handler := authState.AuthMiddle(test)
+	handler := authState.UserEnvMiddle(authState.AuthMiddle(test))
 	handler.ServeHTTP(w, request)
 
 	if w.Header().Get("Location") != "/login" {
@@ -516,7 +515,7 @@ func TestAuthAdminMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.AuthAdminMiddle(test)
+	handler := authState.UserEnvMiddle(authState.AuthAdminMiddle(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == "/login" {
@@ -572,7 +571,7 @@ func TestAuthAdminMiddle2(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.AuthAdminMiddle(test)
+	handler := authState.UserEnvMiddle(authState.AuthAdminMiddle(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") != "/" {
