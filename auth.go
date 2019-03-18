@@ -720,10 +720,10 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
-//UserEnvMiddle grabs username, role, and flash message from cookie,
+//CtxMiddle grabs username, role, and flash message from cookie,
 // tosses it into the context for use in various other middlewares
 // Note: It grabs simply the username, and stores a full User{} in the context
-func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
+func (state *State) CtxMiddle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username := state.getUsernameFromCookie(r, w)
 		message := state.getFlashFromCookie(r, w)
