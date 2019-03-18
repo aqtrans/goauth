@@ -66,9 +66,7 @@ var (
 	// Debug variable can be set to true to have debugging info logged, otherwise silent
 	Debug = false
 	// LoginPath is the path to the login page, used to redirect protected pages
-	LoginPath = "/login"
-	// SignupPath is the path to your signup page, used in the initial registration banner
-	SignupPath          = "/signup"
+	LoginPath           = "/login"
 	errUserDoesNotExist = errors.New("User does not exist")
 )
 
@@ -124,29 +122,6 @@ func check(err error) {
 		}
 	}
 }
-
-/*
-func (state *State) getDB() *bolt.DB {
-	var db *bolt.DB
-	//log.Println(state.BoltDB.path)
-	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		check(err)
-		log.Fatalln(err)
-		return nil
-	}
-	state.BoltDB.authdb = db
-	return state.BoltDB.authdb
-}
-
-func (state *State) releaseDB() {
-	err := state.BoltDB.authdb.Close()
-	if err != nil {
-		check(err)
-		log.Fatalln(err)
-	}
-}
-*/
 
 func validRole(role string) bool {
 	switch role {
@@ -231,29 +206,6 @@ func CheckPasswordHash(hash, password []byte) error {
 	return bcrypt.CompareHashAndPassword(hash, password)
 }
 
-/*
-// NewUserInContext takes a username and context, grabs the info for the user, and crams it into the given context
-func (state *State) NewUserInContext(c context.Context, username string) context.Context {
-	u := state.getUserInfo(username)
-	return context.WithValue(c, UserKey, u)
-}
-
-func userFromContext(c context.Context) (*User, bool) {
-	u, ok := c.Value(UserKey).(*User)
-	return u, ok
-}
-
-// NewFlashInContext adds a given string as a flash message in the context
-func NewFlashInContext(c context.Context, f string) context.Context {
-	return context.WithValue(c, MsgKey, f)
-}
-
-func flashFromContext(c context.Context) (string, bool) {
-	f, ok := c.Value(MsgKey).(string)
-	return f, ok
-}
-*/
-
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for user info and related flash messages
 func (state *State) setSession(key, val string, w http.ResponseWriter) {
@@ -277,21 +229,21 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 //   middleware, pushes the message into context and then template
 func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession(cookieFlash, msg, w)
-	/*
-		if encoded, err := state.cookie.Encode(cookieFlash, msg); err == nil {
-			cookie := &http.Cookie{
-				Name:     cookieFlash,
-				Value:    encoded,
-				Path:     "/",
-				HttpOnly: true,
-				MaxAge:   -1,
-				Expires:  time.Unix(1, 0),
-				SameSite: http.SameSiteDefaultMode,
-			}
-			http.SetCookie(w, cookie)
-		} else {
-			debugln("Error encoding cookie "+cookieFlash+" value", err)
+	/* Not using Expire 'trick' to set flash as below, as this expires cookies right after logins or other POST redirects:
+	if encoded, err := state.cookie.Encode(cookieFlash, msg); err == nil {
+		cookie := &http.Cookie{
+			Name:     cookieFlash,
+			Value:    encoded,
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   -1,
+			Expires:  time.Unix(1, 0),
+			SameSite: http.SameSiteDefaultMode,
 		}
+		http.SetCookie(w, cookie)
+	} else {
+		debugln("Error encoding cookie "+cookieFlash+" value", err)
+	}
 	*/
 }
 
@@ -314,8 +266,6 @@ func (state *State) readSession(key string, r *http.Request) (value string) {
 	return value
 }
 
-// ClearSession currently only clearing the user value
-// The CSRF token should always be around due to the login form and such
 func (state *State) clearSession(key string, w http.ResponseWriter) {
 	//state.SetSession(key, "", w, r)
 	cookie := &http.Cookie{
@@ -334,18 +284,13 @@ func (state *State) clearFlash(w http.ResponseWriter) {
 }
 
 func (state *State) getUsernameFromCookie(r *http.Request) (username string) {
+	pc, fn, line, ok := runtime.Caller(2)
+	details := runtime.FuncForPC(pc)
+	if ok && details != nil {
+		debugln("User cookie read ", details.Name(), fn, line)
+	}
 	return state.readSession(cookieUser, r)
 }
-
-/*
-func (state *State) getRedirectFromCookie(r *http.Request, w http.ResponseWriter) (redirURL string) {
-	redirURL = state.readSession(cookieRedirect, w, r)
-	if redirURL != "" {
-		state.clearSession(cookieRedirect, w)
-	}
-	return redirURL
-}
-*/
 
 func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
 	message = state.readSession(cookieFlash, r)
@@ -355,113 +300,62 @@ func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (
 	return message
 }
 
-/*
-func (state *State) Userlist() ([]string, error) {
-	return state.Backend.Userlist()
-}
-
-func (state *State) GetUserInfo(username string) *User {
-	return state.Backend.GetUserInfo(username)
-}
-*/
-
-/*
-// GetUsername retrieves username, and admin bool from context
-func GetUsername(c context.Context) (username, role string) {
-	//defer timeTrack(time.Now(), "GetUsername")
-	userC, ok := fromUserContext(c)
-	if !ok {
-		userC = &User{}
-	}
-	if ok {
-		username = userC.Username
-		role = userC.Role
-	}
-
-	return username, role
-}
-*/
-
 // IsLoggedIn takes a context, tries to fetch user{} from it,
 //  and if that succeeds, verifies the username fetched actually exists
-func (state *State) IsLoggedIn(r *http.Request) bool {
-	u := state.GetUser(r)
+func (state *State) IsLoggedIn(r *http.Request) (bool, *http.Request) {
+	u, r := state.GetUser(r)
 	if u != nil {
-		return true
+		return true, r
 	}
-	return false
+	return false, r
 }
 
-/*
-// GetUserState returns a *User from the context
-// The *User should have been crammed in there by UserEnvMiddle
-func GetUserState(c context.Context) *User {
-	userC, ok := userFromContext(c)
-	if ok {
-		return userC
-	}
-	if !checkContext(c) {
-		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
-	}
-	return nil
+// NewUserInContext takes a username and context, grabs the info for the user, and crams it into the given context
+func (state *State) newUserInContext(c context.Context, user *User) context.Context {
+	return context.WithValue(c, UserKey, user)
 }
 
-// GetFlash retrieves token from context
-func GetFlash(c context.Context) string {
-	//defer timeTrack(time.Now(), "GetUsername")
-	var flash string
-	t, ok := flashFromContext(c)
-	if !ok {
-		flash = ""
-	}
-	if ok {
-		flash = t
-	}
-	if !checkContext(c) {
-		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
-	}
-	return flash
+func userFromContext(c context.Context) (*User, bool) {
+	u, ok := c.Value(UserKey).(*User)
+	return u, ok
 }
 
-
-func newCheckInContext(c context.Context) context.Context {
-	return context.WithValue(c, ChkKey, true)
+// NewFlashInContext adds a given string as a flash message in the context
+func newFlashInContext(c context.Context, f string) context.Context {
+	return context.WithValue(c, MsgKey, f)
 }
 
-func checkContext(c context.Context) bool {
-	_, ok := c.Value(ChkKey).(bool)
-	if ok {
-		return true
-	}
-	return false
+func flashFromContext(c context.Context) (string, bool) {
+	f, ok := c.Value(MsgKey).(string)
+	return f, ok
 }
-*/
 
 // GetUser first tries to fetch the User from the context.
 // If it's not there, it pulls the username from the cookie and puts it there
-func (state *State) GetUser(r *http.Request) *User {
+func (state *State) GetUser(r *http.Request) (*User, *http.Request) {
 	var u *User
 	u, ok := r.Context().Value(UserKey).(*User)
 	if !ok {
 		username := state.getUsernameFromCookie(r)
 		if username != "" {
 			u = state.getUserInfo(username)
-			r = r.WithContext(context.WithValue(r.Context(), UserKey, u))
+			userCtx := state.newUserInContext(r.Context(), u)
+			r = r.WithContext(userCtx)
 		}
 	}
-	return u
+	return u, r
 }
 
 // GetFlash first tries to fetch the flash message from the context.
 // If it's not there, it pulls it from the cookie and puts it there
-func (state *State) GetFlash(r *http.Request, w http.ResponseWriter) string {
+func (state *State) GetFlash(r *http.Request, w http.ResponseWriter) (string, *http.Request) {
 	var msg string
 	msg, ok := r.Context().Value(MsgKey).(string)
 	if !ok {
 		msg = state.getFlashFromCookie(r, w)
 		r = r.WithContext(context.WithValue(r.Context(), MsgKey, msg))
 	}
-	return msg
+	return msg, r
 }
 
 // IsAdmin checks if the given user is an admin
@@ -476,12 +370,23 @@ func (u *User) IsAdmin() bool {
 }
 
 /*
-// GetName returns the user's Name
-func (u *User) GetName() string {
-	if u != nil {
-		return u.Name
+// LoadCtx should be called before heavily calling into GetUser/GetFlash
+func (state *State) LoadCtx(r *http.Request, w http.ResponseWriter) *http.Request {
+	u, ok := r.Context().Value(UserKey).(*User)
+	if !ok {
+		username := state.getUsernameFromCookie(r)
+		if username != "" {
+			u = state.getUserInfo(username)
+			userCtx := state.newUserInContext(r.Context(), u)
+			r = r.WithContext(userCtx)
+		}
 	}
-	return ""
+	msg, ok := r.Context().Value(MsgKey).(string)
+	if !ok {
+		msg = state.getFlashFromCookie(r, w)
+		r = r.WithContext(context.WithValue(r.Context(), MsgKey, msg))
+	}
+	return r
 }
 */
 
@@ -723,7 +628,8 @@ func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 // AuthMiddle is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
 func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !state.IsLoggedIn(r) {
+		loggedIn, r := state.IsLoggedIn(r)
+		if !loggedIn {
 			Redirect(state, w, r)
 		}
 		next.ServeHTTP(w, r)
@@ -733,7 +639,8 @@ func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 // AuthMiddleHandler is a middleware to protect a given handler; users only access
 func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !state.IsLoggedIn(r) {
+		loggedIn, r := state.IsLoggedIn(r)
+		if !loggedIn {
 			Redirect(state, w, r)
 		}
 		next.ServeHTTP(w, r)
@@ -743,9 +650,10 @@ func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 // AuthAdminMiddle is a middleware to protect a given handler; admin only access
 func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := state.GetUser(r)
+		user, r := state.GetUser(r)
+		loggedIn, r := state.IsLoggedIn(r)
 		//if username == "" {
-		if !state.IsLoggedIn(r) {
+		if !loggedIn {
 			Redirect(state, w, r)
 		}
 		//If user is not an Admin, just redirect to index
@@ -758,57 +666,6 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 	})
 }
-
-/*
-//UserEnvMiddle grabs username, role, and flash message from cookie,
-// tosses it into the context for use in various other middlewares
-// Note: It grabs simply the username, and stores a full User{} in the context
-func (state *State) UserEnvMiddle(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username := state.getUsernameFromCookie(r, w)
-		message := state.getFlashFromCookie(r, w)
-
-		// Escape messages here, so the user does not have to
-		//safeMessage := template.HTMLEscapeString(message)
-
-		// If necessary, override safeMessage with a signup link and the initial registration key
-		if state.initialRegistrationKey != "" {
-			log.Println("Initial Registration Token:", state.initialRegistrationKey)
-			message = `<a href="` + SignupPath + `">Signup now!</a> Token: ` + state.initialRegistrationKey
-		}
-
-		newc := r.Context()
-
-		// Add a little flag to tell whether this middleware has been hit
-		newc = newCheckInContext(newc)
-
-		if username != "" {
-			newc = state.NewUserInContext(newc, username)
-		}
-
-		// Continue to depend on whether message was blank, in case HTMLEscapeEstring adds something
-		if message != "" {
-			newc = NewFlashInContext(newc, message)
-		}
-
-		next.ServeHTTP(w, r.WithContext(newc))
-	})
-}
-*/
-
-/*
-func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		username := state.getUsernameFromCookie(r, w)
-		if username == "" {
-			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+r.URL.String(), 302)
-			return
-		}
-		next.ServeHTTP(w, r)
-	}
-	return http.HandlerFunc(handler)
-}
-*/
 
 func (db *DB) dbInit() string {
 	boltDB := db.getDB()
