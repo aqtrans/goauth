@@ -733,7 +733,7 @@ func (state *State) CtxMiddle(next http.Handler) http.Handler {
 
 		// If necessary, override safeMessage with a signup link and the initial registration key
 		if state.initialRegistrationKey != "" {
-			log.Println("Initial Registration Token:", state.initialRegistrationKey)
+			//log.Println("Initial Registration Token:", state.initialRegistrationKey)
 			message = `<a href="` + SignupPath + `">Signup now!</a> Token: ` + state.initialRegistrationKey
 		}
 
@@ -877,11 +877,11 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 		password := r.FormValue("password")
 		givenToken := r.FormValue("register_key")
 
-		log.Println("Given token:", givenToken)
+		//log.Println("Given token:", givenToken)
 		isValid, userRole := state.ValidateRegisterToken(givenToken)
 
 		if isValid {
-			log.Println("Yay, registration token is valid!")
+			//log.Println("Yay, registration token is valid!")
 			// Delete the token so it cannot be reused
 			state.DeleteRegisterToken(givenToken)
 
@@ -1023,7 +1023,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			//redirURL := state.getRedirectFromCookie(r, w)
 			redirURL := state.readSession(cookieRedirect, w, r)
 			if redirURL != "" {
-				log.Println("Redirecting to", redirURL)
+				//log.Println("Redirecting to", redirURL)
 				state.clearSession(cookieRedirect, w)
 				http.Redirect(w, r, redirURL, http.StatusSeeOther)
 				return
@@ -1048,7 +1048,7 @@ func (db *DB) GenerateRegisterToken(role string) string {
 	switch role {
 	case roleAdmin, roleUser:
 	default:
-		log.Println("GenerateRegisterToken role is invalid, setting to user: " + role)
+		//log.Println("GenerateRegisterToken role is invalid, setting to user: " + role)
 		role = roleUser
 	}
 
@@ -1088,12 +1088,13 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 			return errors.New("token does not exist")
 		}
 		userRole = make([]byte, len(v))
-		log.Println("Role:", string(v))
+		//log.Println("Role:", string(v))
 		copy(userRole, v)
 		return nil
 	})
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
+		check(err)
 		return false, ""
 	}
 
