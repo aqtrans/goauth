@@ -32,7 +32,7 @@ import (
 
 	"github.com/boltdb/bolt"
 	"github.com/gorilla/csrf"
-	"github.com/gorilla/securecookie"
+	"github.com/gorilla/sessions"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -60,6 +60,7 @@ const (
 	cookieFlash    = "flash"
 	cookieState    = "state"
 	cookieRedirect = "redirect"
+	sessionName    = "state-session"
 )
 
 var (
@@ -74,7 +75,7 @@ var (
 
 // State holds all required info to get authentication working in the app
 type State struct {
-	cookie *securecookie.SecureCookie
+	cookie *sessions.CookieStore
 	DB
 	initialRegistrationKey string
 }
@@ -94,6 +95,12 @@ type authInfo struct {
 type User struct {
 	Name string
 	Role string
+}
+
+type boltSession struct {
+	username string
+	created  time.Time
+	IP       string
 }
 
 // GetName is a helper function that sets the user blank if User is nil
@@ -192,8 +199,14 @@ func NewAuthStateWithDB(db *DB, path string) *State {
 
 	key := db.dbInit()
 
+	cookieStore := sessions.NewCookieStore(db.getAuthInfo())
+	cookieStore.Options = &sessions.Options{
+		Path:     "/",
+		HttpOnly: true,
+	}
+
 	return &State{
-		cookie:                 securecookie.New(db.getAuthInfo()),
+		cookie:                 cookieStore,
 		DB:                     *db,
 		initialRegistrationKey: key,
 	}
@@ -254,41 +267,56 @@ func flashFromContext(c context.Context) (string, bool) {
 
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for user info and related flash messages
-func (state *State) setSession(key, val string, w http.ResponseWriter) {
-
-	if encoded, err := state.cookie.Encode(key, val); err == nil {
-		cookie := &http.Cookie{
-			Name:     key,
-			Value:    encoded,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteDefaultMode,
-		}
-		http.SetCookie(w, cookie)
-	} else {
-		debugln("Error encoding cookie "+key+" value", err)
+func (state *State) setSession(key, val string, r *http.Request, w http.ResponseWriter) {
+	s, err := state.cookie.Get(r, sessionName)
+	if err != nil {
+		log.Fatalln("setSession/cookie.New() error:", err)
 	}
+	s.Values[key] = val
+	s.Save(r, w)
+
+	/*
+		if encoded, err := state.cookie.Encode(key, val); err == nil {
+			cookie := &http.Cookie{
+				Name:     key,
+				Value:    encoded,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteDefaultMode,
+			}
+			http.SetCookie(w, cookie)
+		} else {
+			debugln("Error encoding cookie "+key+" value", err)
+		}
+	*/
 
 }
 
 // SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
 //   middleware, pushes the message into context and then template
-func (state *State) SetFlash(msg string, w http.ResponseWriter) {
-	state.setSession(cookieFlash, msg, w)
+func (state *State) SetFlash(msg string, r *http.Request, w http.ResponseWriter) {
+	state.setSession(cookieFlash, msg, r, w)
 }
 
 // SetUsername sets the username into the cookie
-func (state *State) SetUsername(msg string, w http.ResponseWriter) {
-	state.setSession(cookieUser, msg, w)
+func (state *State) SetUsername(msg string, r *http.Request, w http.ResponseWriter) {
+	state.setSession(cookieUser, msg, r, w)
 }
 
-func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
-	if cookie, err := r.Cookie(key); err == nil {
-		err := state.cookie.Decode(key, cookie.Value, &value)
+func (state *State) readSession(key string, r *http.Request, w http.ResponseWriter) (value string) {
+	if _, err := r.Cookie(key); err == nil {
+		s, err := state.cookie.Get(r, sessionName)
 		if err != nil {
-			debugln("Error decoding cookie value for", key, err)
-			state.setSession(key, "", w)
+			log.Fatalln("Error decoding cookie value for", key, err)
 		}
+		value = s.Values[key].(string)
+		/*
+			err := state.cookie.Decode(key, cookie.Value, &value)
+			if err != nil {
+				debugln("Error decoding cookie value for", key, err)
+				state.setSession(key, "", w)
+			}
+		*/
 	} else if err != http.ErrNoCookie {
 		debugln("Error reading cookie", key, err)
 	}
@@ -315,7 +343,7 @@ func (state *State) clearFlash(w http.ResponseWriter) {
 }
 
 func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
-	return state.readSession(cookieUser, w, r)
+	return state.readSession(cookieUser, r, w)
 }
 
 /*
@@ -329,7 +357,7 @@ func (state *State) getRedirectFromCookie(r *http.Request, w http.ResponseWriter
 */
 
 func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
-	message = state.readSession(cookieFlash, w, r)
+	message = state.readSession(cookieFlash, r, w)
 	if message != "" {
 		state.clearFlash(w)
 	}
@@ -675,7 +703,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 // Redirect throws the r.URL.Path into a cookie named "redirect" and redirects to the login page
 func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	// Save URL in cookie for later use
-	state.setSession(cookieRedirect, r.URL.Path, w)
+	state.setSession(cookieRedirect, r.URL.Path, r, w)
 	// Redirect to the login page, should be at LoginPath
 	http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 	return
@@ -712,7 +740,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
 			log.Println(user.Name + " attempting to access " + r.URL.Path)
-			state.SetFlash("Sorry, you are not allowed to see that.", w)
+			state.SetFlash("Sorry, you are not allowed to see that.", r, w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -894,14 +922,14 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 			err := state.newUser(username, password, userRole)
 			if err != nil {
 				check(err)
-				state.SetFlash("Error adding user. Check logs.", w)
+				state.SetFlash("Error adding user. Check logs.", r, w)
 				http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 				return
 			}
-			state.SetFlash("Successfully added '"+username+"' user.", w)
+			state.SetFlash("Successfully added '"+username+"' user.", r, w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		} else {
-			state.SetFlash("Registration token is invalid.", w)
+			state.SetFlash("Registration token is invalid.", r, w)
 			http.Redirect(w, r, "/", http.StatusInternalServerError)
 		}
 
@@ -1017,11 +1045,11 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Login authentication
 		if state.Auth(username, password) {
-			state.SetUsername(username, w)
-			state.SetFlash("User '"+username+"' successfully logged in.", w)
+			state.SetUsername(username, r, w)
+			state.SetFlash("User '"+username+"' successfully logged in.", r, w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
 			//redirURL := state.getRedirectFromCookie(r, w)
-			redirURL := state.readSession(cookieRedirect, w, r)
+			redirURL := state.readSession(cookieRedirect, r, w)
 			if redirURL != "" {
 				//log.Println("Redirecting to", redirURL)
 				state.clearSession(cookieRedirect, w)
@@ -1031,7 +1059,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/index", http.StatusSeeOther)
 			return
 		}
-		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", r, w)
 		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
 		return
 	case "PUT":
