@@ -5,10 +5,10 @@ require (
 	github.com/gorilla/csrf v1.5.1
 	github.com/gorilla/securecookie v1.1.1
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v0.0.0-20180228053838-6644d46b81fa
 	github.com/spf13/pflag v1.0.0 // indirect
 	golang.org/x/crypto v0.0.0-20170209233901-453249f01cfe
-	golang.org/x/sys v0.0.0-20170308153327-99f16d856c98 // indirect
 )
 
 go 1.13

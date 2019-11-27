@@ -18,21 +18,19 @@ Use authstate methods and handlers
 */
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
-	"os"
 	"runtime"
 	"time"
 
 	"github.com/boltdb/bolt"
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/securecookie"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -103,16 +101,6 @@ func (u *User) GetName() string {
 		return u.Name
 	}
 	return ""
-}
-
-// If Debug is set to true, this logs to Stderr
-func debugln(v ...interface{}) {
-	if Debug {
-		var buf bytes.Buffer
-		debuglogger := log.New(&buf, "Debug: ", log.Ltime)
-		debuglogger.SetOutput(os.Stderr)
-		debuglogger.Print(v...)
-	}
 }
 
 func check(err error) {
@@ -266,7 +254,7 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 		}
 		http.SetCookie(w, cookie)
 	} else {
-		debugln("Error encoding cookie "+key+" value", err)
+		log.Debugln("Error encoding cookie "+key+" value", err)
 	}
 
 }
@@ -286,11 +274,11 @@ func (state *State) readSession(key string, w http.ResponseWriter, r *http.Reque
 	if cookie, err := r.Cookie(key); err == nil {
 		err := state.cookie.Decode(key, cookie.Value, &value)
 		if err != nil {
-			debugln("Error decoding cookie value for", key, err)
+			log.Debugln("Error decoding cookie value for", key, err)
 			state.setSession(key, "", w)
 		}
 	} else if err != http.ErrNoCookie {
-		debugln("Error reading cookie", key, err)
+		log.Debugln("Error reading cookie", key, err)
 	}
 	return value
 }
@@ -469,7 +457,7 @@ func (db *DB) Auth(username, password string) bool {
 
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
-		debugln("error verifying password for user ", username, err)
+		log.Debugln("error verifying password for user ", username, err)
 		return false
 	}
 	// TODO: Should look into fleshing this out
@@ -821,7 +809,7 @@ func (db *DB) dbInit() string {
 
 		hashKey := infobucket.Get([]byte(hashKeyName))
 		if hashKey == nil {
-			debugln("Throwing hashkey into auth.db.")
+			log.Debugln("Throwing hashkey into auth.db.")
 			// Generate a random hashKey
 			hashKey := randBytes(64)
 
@@ -834,7 +822,7 @@ func (db *DB) dbInit() string {
 
 		blockKey := infobucket.Get([]byte(blockKeyName))
 		if blockKey == nil {
-			debugln("Throwing blockkey into auth.db.")
+			log.Debugln("Throwing blockkey into auth.db.")
 			// Generate a random blockKey
 			blockKey := randBytes(32)
 
@@ -847,7 +835,7 @@ func (db *DB) dbInit() string {
 
 		csrfKey := infobucket.Get([]byte(csrfKeyName))
 		if csrfKey == nil {
-			debugln("Throwing csrfKey into auth.db.")
+			log.Debugln("Throwing csrfKey into auth.db.")
 			// Generate a random csrfKey
 			csrfKey := randBytes(32)
 
