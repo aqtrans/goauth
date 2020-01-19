@@ -547,6 +547,8 @@ func TestAuthAdminMiddle2(t *testing.T) {
 	authState := NewAuthState(tmpdb)
 	defer os.Remove(tmpdb)
 
+	// Register 2 users, as first will automatically be an admin
+	authState.NewUser("firstuser", "12345")
 	authState.NewUser("user", "12345")
 
 	// Attempt a good login
