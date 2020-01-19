@@ -89,6 +89,8 @@ func TestContext(t *testing.T) {
 	// Try fetching without anything in the context first
 	ctx := context.Background()
 
+	ctx = newCheckInContext(ctx)
+
 	userState := GetUserState(ctx)
 	if userState != nil {
 		t.Error("userState from context is not nil")
