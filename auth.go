@@ -27,10 +27,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/boltdb/bolt"
+	//"github.com/boltdb/bolt"
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/securecookie"
 	log "github.com/sirupsen/logrus"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/bcrypt"
 )
 
