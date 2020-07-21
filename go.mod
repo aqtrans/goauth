@@ -1,7 +1,6 @@
 module git.jba.io/go/auth
 
 require (
-	github.com/boltdb/bolt v0.0.0-20171120010307-9da317453632
 	github.com/gorilla/csrf v1.6.2
 	github.com/gorilla/securecookie v1.1.1
 	github.com/konsorten/go-windows-terminal-sequences v1.0.2 // indirect
@@ -13,4 +12,4 @@ require (
 	golang.org/x/crypto v0.0.0-20200117160349-530e935923ad
 )
 
-go 1.13
+go 1.14
