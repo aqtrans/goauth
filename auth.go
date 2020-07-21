@@ -840,8 +840,14 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 
 		if isValid {
 			//log.Println("Yay, registration token is valid!")
-			// Delete the token so it cannot be reused
-			state.DeleteRegisterToken(givenToken)
+
+			// Delete the token so it cannot be reused if the token is not blank
+			// The first user can signup without a token and is granted admin rights
+			if givenToken != "" {
+				state.DeleteRegisterToken(givenToken)
+			} else {
+				userRole = roleAdmin
+			}
 
 			err := state.newUser(username, password, userRole)
 			if err != nil {
