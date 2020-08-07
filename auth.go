@@ -51,6 +51,7 @@ const (
 	csrfKeyName            = "CSRFKey"
 	userInfoBucketName     = "Users"
 	registerKeysBucketName = "RegisterKeys"
+	sessionIDsBucketName   = "SessionIDs"
 	// Available roles for users
 	roleAdmin = "admin"
 	roleUser  = "user"
@@ -264,9 +265,11 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 	state.setSession(cookieFlash, msg, w)
 }
 
-// SetUsername sets the username into the cookie
-func (state *State) SetUsername(msg string, w http.ResponseWriter) {
-	state.setSession(cookieUser, msg, w)
+// Login generates a random session ID, throws that into the DB,
+//   then sets that session ID into the cookie
+func (state *State) Login(username string, w http.ResponseWriter) {
+	sessionID := state.DB.PutSessionID(username)
+	state.setSession(cookieUser, sessionID, w)
 }
 
 func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
@@ -302,7 +305,12 @@ func (state *State) clearFlash(w http.ResponseWriter) {
 }
 
 func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
-	return state.readSession(cookieUser, w, r)
+	sessionID := state.readSession(cookieUser, w, r)
+	// If there is a session cookie, get the associated user from the DB
+	if sessionID != "" {
+		username = state.DB.GetSessionID(sessionID)
+	}
+	return username
 }
 
 /*
@@ -533,6 +541,8 @@ func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
 
 // LogoutHandler clears the "user" cookie, logging the user out
 func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	sessionID := state.readSession(cookieUser, w, r)
+	state.DB.DeleteSessionID(sessionID)
 	state.clearSession(cookieUser, w)
 	http.Redirect(w, r, r.Referer(), 302)
 }
@@ -779,6 +789,11 @@ func (db *DB) dbInit() {
 			return fmt.Errorf("create bucket: %s", err)
 		}
 
+		_, err = tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+
 		hashKey := infobucket.Get([]byte(hashKeyName))
 		if hashKey == nil {
 			log.Debugln("Throwing hashkey into auth.db.")
@@ -859,7 +874,7 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 
 			// Login the recently added user
 			if state.Auth(username, password) {
-				state.SetUsername(username, w)
+				state.Login(username, w)
 			}
 
 			state.SetFlash("Successfully added '"+username+"' user.", w)
@@ -981,7 +996,7 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Login authentication
 		if state.Auth(username, password) {
-			state.SetUsername(username, w)
+			state.Login(username, w)
 			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
 			//redirURL := state.getRedirectFromCookie(r, w)
@@ -1160,4 +1175,78 @@ func (state *State) AnyUsers() bool {
 	}
 
 	return anyUsers
+}
+
+// PutSessionID generates a session ID and ties the ID to the given user
+func (db *DB) PutSessionID(username string) string {
+	sessionID := randString(128)
+	log.Println("PutSessionID session ID for", username, ":", sessionID)
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	err := boltDB.Update(func(tx *bolt.Tx) error {
+		sessionsBucket, err := tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		err = sessionsBucket.Put([]byte(sessionID), []byte(username))
+		if err != nil {
+			check(err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalln("Error putting session ID into DB:", err)
+	}
+	return sessionID
+}
+
+// GetSessionID checks for a given session ID in the DB and returns the associated username
+func (db *DB) GetSessionID(sessionID string) string {
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	var usernameByte []byte
+
+	err := boltDB.View(func(tx *bolt.Tx) error {
+
+		b := tx.Bucket([]byte(sessionIDsBucketName))
+		v := b.Get([]byte(sessionID))
+		if v == nil {
+			return errors.New("session ID does not exist")
+		}
+		usernameByte = make([]byte, len(v))
+		copy(usernameByte, v)
+		return nil
+	})
+	if err != nil {
+		//log.Println(err)
+		check(err)
+		return ""
+	}
+
+	return string(usernameByte)
+}
+
+// DeleteSessionID deletes a given session ID
+func (db *DB) DeleteSessionID(sessionID string) {
+	boltDB := db.getDB()
+	defer db.releaseDB()
+
+	err := boltDB.Update(func(tx *bolt.Tx) error {
+		sessionsBucket, err := tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		err = sessionsBucket.Delete([]byte(sessionID))
+		if err != nil {
+			check(err)
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Fatalln("Error deleting session ID from DB:", err)
+	}
 }
