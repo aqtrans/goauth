@@ -856,6 +856,12 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 				http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 				return
 			}
+
+			// Login the recently added user
+			if state.Auth(username, password) {
+				state.SetUsername(username, w)
+			}
+
 			state.SetFlash("Successfully added '"+username+"' user.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		} else {
