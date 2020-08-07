@@ -1127,3 +1127,31 @@ func (state *State) NewUserToken(w http.ResponseWriter, r *http.Request) {
 	default:
 	}
 }
+
+// AnyUsers checks if there are any users in the DB
+// This is useful in application initialization flows
+func (state *State) AnyUsers() bool {
+	boltDB := state.DB.getDB()
+	defer state.DB.releaseDB()
+
+	var anyUsers bool
+
+	err := boltDB.View(func(tx *bolt.Tx) error {
+
+		// Check if no users exist and token is blank. If so, bypass token check
+		userbucket := tx.Bucket([]byte(userInfoBucketName))
+		if userbucket.Stats().KeyN == 0 {
+			anyUsers = false
+		} else {
+			anyUsers = true
+		}
+
+		return nil
+	})
+	if err != nil {
+		log.Println(err)
+		return anyUsers
+	}
+
+	return anyUsers
+}
