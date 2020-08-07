@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"runtime"
 	"time"
 
 	//"github.com/boltdb/bolt"
@@ -63,8 +62,6 @@ const (
 )
 
 var (
-	// Debug variable can be set to true to have debugging info logged, otherwise silent
-	Debug = false
 	// LoginPath is the path to the login page, used to redirect protected pages
 	LoginPath = "/login"
 	// SignupPath is the path to your signup page, used in the initial registration banner
@@ -104,16 +101,6 @@ func (u *User) GetName() string {
 	return ""
 }
 
-func check(err error) {
-	if err != nil {
-		pc, fn, line, ok := runtime.Caller(1)
-		details := runtime.FuncForPC(pc)
-		if ok && details != nil {
-			log.Printf("[auth.error] in %s[%s:%d] %v", details.Name(), fn, line, err)
-		}
-	}
-}
-
 /*
 func (state *State) getDB() *bolt.DB {
 	var db *bolt.DB
@@ -147,13 +134,10 @@ func validRole(role string) bool {
 }
 
 func (db *DB) getDB() *bolt.DB {
-	//var authDB *bolt.DB
-	//log.Println(state.BoltDB.path)
 	var err error
 	db.authdb, err = bolt.Open(db.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
-		check(err)
-		log.Fatalln(err)
+		log.Fatalln("Error opening auth.DB in getDB()", err)
 		return nil
 	}
 	return db.authdb
@@ -162,8 +146,7 @@ func (db *DB) getDB() *bolt.DB {
 func (db *DB) releaseDB() {
 	err := db.authdb.Close()
 	if err != nil {
-		check(err)
-		log.Fatalln(err)
+		log.Fatalln("Error closing auth.db in releaseDB()", err)
 	}
 }
 
@@ -464,6 +447,7 @@ func (db *DB) Auth(username, password string) bool {
 
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
+		// Should not be a fatal error
 		log.Debugln("error verifying password for user ", username, err)
 		return false
 	}
@@ -487,8 +471,7 @@ func (db *DB) DoesUserExist(username string) bool {
 		return true
 	}
 	if err != nil && err != errUserDoesNotExist {
-		check(err)
-		return false
+		log.Fatalln("Boltdb error in DoesUserExist():", err)
 	}
 	return false
 }
@@ -511,8 +494,7 @@ func (db *DB) getUserInfo(username string) *User {
 		return nil
 	})
 	if err != nil {
-		check(err)
-		return nil
+		log.Fatalln("Boltdb error in getUserInfo():", err)
 	}
 	return &u
 
@@ -533,8 +515,7 @@ func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
 		return nil
 	})
 	if err != nil {
-		check(err)
-		return []byte(""), []byte("")
+		log.Fatalln("Boltdb error in getAuthInfo():", err)
 	}
 	return hashkey, blockkey
 }
@@ -570,7 +551,7 @@ func (db *DB) newUser(username, password, role string) error {
 	hash, err := HashPassword([]byte(password))
 	if err != nil {
 		// couldn't hash password for some reason
-		check(err)
+		log.Debugln("Error hasing password:", err)
 		return err
 	}
 
@@ -644,7 +625,7 @@ func (db *DB) DeleteUser(username string) error {
 	defer db.releaseDB()
 
 	err := boltdb.Update(func(tx *bolt.Tx) error {
-		log.Println(username + " has been deleted")
+		log.Debugln(username + " has been deleted")
 		return tx.Bucket([]byte(userInfoBucketName)).DeleteBucket([]byte(username))
 	})
 	if err != nil {
@@ -671,7 +652,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 		if err != nil {
 			return err
 		}
-		log.Println("User " + username + " has changed their password.")
+		log.Debugln("User " + username + " has changed their password.")
 		return nil
 	})
 	return err
@@ -716,7 +697,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		}
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
-			log.Println(user.Name + " attempting to access " + r.URL.Path)
+			log.Debugln(user.Name + " attempting to access " + r.URL.Path)
 			state.SetFlash("Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
@@ -802,7 +783,7 @@ func (db *DB) dbInit() {
 
 			err = infobucket.Put([]byte(hashKeyName), hashKey)
 			if err != nil {
-				check(err)
+				log.Debugln("Error putting hashkey into auth.db:", err)
 				return err
 			}
 		}
@@ -815,7 +796,7 @@ func (db *DB) dbInit() {
 
 			err = infobucket.Put([]byte(blockKeyName), blockKey)
 			if err != nil {
-				check(err)
+				log.Debugln("Error putting blockey into auth.db:", err)
 				return err
 			}
 		}
@@ -828,7 +809,7 @@ func (db *DB) dbInit() {
 
 			err = infobucket.Put([]byte(csrfKeyName), csrfKey)
 			if err != nil {
-				check(err)
+				log.Debugln("Error throwing csrfKey into auth.db:", err)
 				return err
 			}
 		}
@@ -850,11 +831,9 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 		password := r.FormValue("password")
 		givenToken := r.FormValue("register_key")
 
-		//log.Println("Given token:", givenToken)
 		isValid, userRole := state.ValidateRegisterToken(givenToken)
 
 		if isValid {
-			//log.Println("Yay, registration token is valid!")
 
 			// Delete the token so it cannot be reused if the token is not blank
 			// The first user can signup without a token and is granted admin rights
@@ -866,7 +845,7 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 
 			err := state.newUser(username, password, userRole)
 			if err != nil {
-				check(err)
+				log.Debugln("Error adding user:", err)
 				state.SetFlash("Error adding user. Check logs.", w)
 				http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 				return
@@ -999,10 +978,8 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			state.Login(username, w)
 			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
-			//redirURL := state.getRedirectFromCookie(r, w)
 			redirURL := state.readSession(cookieRedirect, w, r)
 			if redirURL != "" {
-				//log.Println("Redirecting to", redirURL)
 				state.clearSession(cookieRedirect, w)
 				http.Redirect(w, r, redirURL, http.StatusSeeOther)
 				return
@@ -1027,7 +1004,6 @@ func (db *DB) GenerateRegisterToken(role string) string {
 	switch role {
 	case roleAdmin, roleUser:
 	default:
-		//log.Println("GenerateRegisterToken role is invalid, setting to user: " + role)
 		role = roleUser
 	}
 
@@ -1042,13 +1018,12 @@ func (db *DB) GenerateRegisterToken(role string) string {
 		}
 		err = registerBucket.Put([]byte(token), []byte(role))
 		if err != nil {
-			check(err)
 			return err
 		}
 		return nil
 	})
 	if err != nil {
-		log.Fatalln("Error putting register token into DB:", err)
+		log.Fatalln("GenerateRegisterToken() Boltdb error:", err)
 	}
 	return token
 }
@@ -1074,14 +1049,11 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 			return errors.New("token does not exist")
 		}
 		userRole = make([]byte, len(v))
-		//log.Println("Role:", string(v))
 		copy(userRole, v)
 		return nil
 	})
 	if err != nil {
-		//log.Println(err)
-		check(err)
-		return false, ""
+		log.Fatalln("ValidateRegisterToken() Boltdb error:", err)
 	}
 
 	return true, string(userRole)
@@ -1099,13 +1071,12 @@ func (db *DB) DeleteRegisterToken(token string) {
 		}
 		err = registerBucket.Delete([]byte(token))
 		if err != nil {
-			check(err)
 			return err
 		}
 		return nil
 	})
 	if err != nil {
-		log.Fatalln("Error putting register token into DB:", err)
+		log.Fatalln("DeleteRegisterToken() Boltdb error:", err)
 	}
 }
 
@@ -1123,8 +1094,7 @@ func (db *DB) getCSRFKey() []byte {
 		return nil
 	})
 	if err != nil {
-		log.Println("ERROR: CSRF token not found in authdb. CSRF protection will not work.")
-		return []byte("")
+		log.Fatalln("getCSRFKey() Boltdb error:", err)
 	}
 	return csrfKey
 }
@@ -1170,8 +1140,7 @@ func (state *State) AnyUsers() bool {
 		return nil
 	})
 	if err != nil {
-		log.Println(err)
-		return anyUsers
+		log.Fatalln("auth.AnyUsers() Boltdb error:", err)
 	}
 
 	return anyUsers
@@ -1180,7 +1149,7 @@ func (state *State) AnyUsers() bool {
 // PutSessionID generates a session ID and ties the ID to the given user
 func (db *DB) PutSessionID(username string) string {
 	sessionID := randString(128)
-	log.Println("PutSessionID session ID for", username, ":", sessionID)
+	log.Debugln("PutSessionID session ID for", username, ":", sessionID)
 	boltDB := db.getDB()
 	defer db.releaseDB()
 
@@ -1191,13 +1160,12 @@ func (db *DB) PutSessionID(username string) string {
 		}
 		err = sessionsBucket.Put([]byte(sessionID), []byte(username))
 		if err != nil {
-			check(err)
 			return err
 		}
 		return nil
 	})
 	if err != nil {
-		log.Fatalln("Error putting session ID into DB:", err)
+		log.Fatalln("auth.PutSessionID() Boltdb error:", err)
 	}
 	return sessionID
 }
@@ -1221,9 +1189,7 @@ func (db *DB) GetSessionID(sessionID string) string {
 		return nil
 	})
 	if err != nil {
-		//log.Println(err)
-		check(err)
-		return ""
+		log.Fatalln("auth.GetSessionID() Boltdb error:", err)
 	}
 
 	return string(usernameByte)
@@ -1241,12 +1207,11 @@ func (db *DB) DeleteSessionID(sessionID string) {
 		}
 		err = sessionsBucket.Delete([]byte(sessionID))
 		if err != nil {
-			check(err)
 			return err
 		}
 		return nil
 	})
 	if err != nil {
-		log.Fatalln("Error deleting session ID from DB:", err)
+		log.Fatalln("auth.DeleteSessionID() Boltdb error:", err)
 	}
 }

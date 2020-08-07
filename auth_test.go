@@ -12,9 +12,11 @@ import (
 	"testing"
 )
 
+/*
 func init() {
-	Debug = true
+	logrus.SetLevel(logrus.DebugLevel)
 }
+*/
 
 // tempfile returns a temporary file path.
 func tempfile() string {
