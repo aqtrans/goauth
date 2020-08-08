@@ -1,24 +1,6 @@
 package auth
 
-/*
-This package handles basic user authentication. It's design is based on https://github.com/xyproto/permissionbolt/,
-initializing a 'state' that is passed around to hold the boltDB connection and secureCookie instance.
-
-All cookie values (flash messages and usernames) are encrypted using gorilla/securecookie,
-and the HashKey and BlockKey are generated randomly and then are permanent per-db.
-
-The UserEnvMiddle middleware is required in order for the cookie info to be read into a context object.
-This ensures the cookie is not repeatedly read every time the user info is needed.
-
-Example for using auth.State in an app:
-In main()
-       // Bring up authState
-       authState, _ = auth.NewAuthState("./data/auth.db")
-Use authstate methods and handlers
-*/
-
 import (
-	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -26,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	//"github.com/boltdb/bolt"
 	"github.com/gorilla/csrf"
 	"github.com/gorilla/securecookie"
 	log "github.com/sirupsen/logrus"
@@ -100,29 +81,6 @@ func (u *User) GetName() string {
 	}
 	return ""
 }
-
-/*
-func (state *State) getDB() *bolt.DB {
-	var db *bolt.DB
-	//log.Println(state.BoltDB.path)
-	db, err := bolt.Open(state.BoltDB.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		check(err)
-		log.Fatalln(err)
-		return nil
-	}
-	state.BoltDB.authdb = db
-	return state.BoltDB.authdb
-}
-
-func (state *State) releaseDB() {
-	err := state.BoltDB.authdb.Close()
-	if err != nil {
-		check(err)
-		log.Fatalln(err)
-	}
-}
-*/
 
 func validRole(role string) bool {
 	switch role {
@@ -202,27 +160,6 @@ func CheckPasswordHash(hash, password []byte) error {
 	return bcrypt.CompareHashAndPassword(hash, password)
 }
 
-// NewUserInContext takes a username and context, grabs the info for the user, and crams it into the given context
-func (state *State) NewUserInContext(c context.Context, username string) context.Context {
-	u := state.getUserInfo(username)
-	return context.WithValue(c, UserKey, u)
-}
-
-func userFromContext(c context.Context) (*User, bool) {
-	u, ok := c.Value(UserKey).(*User)
-	return u, ok
-}
-
-// NewFlashInContext adds a given string as a flash message in the context
-func NewFlashInContext(c context.Context, f string) context.Context {
-	return context.WithValue(c, MsgKey, f)
-}
-
-func flashFromContext(c context.Context) (string, bool) {
-	f, ok := c.Value(MsgKey).(string)
-	return f, ok
-}
-
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for user info and related flash messages
 func (state *State) setSession(key, val string, w http.ResponseWriter) {
@@ -255,12 +192,11 @@ func (state *State) Login(username string, w http.ResponseWriter) {
 	state.setSession(cookieUser, sessionID, w)
 }
 
-func (state *State) readSession(key string, w http.ResponseWriter, r *http.Request) (value string) {
+func (state *State) readSession(key string, r *http.Request) (value string) {
 	if cookie, err := r.Cookie(key); err == nil {
 		err := state.cookie.Decode(key, cookie.Value, &value)
 		if err != nil {
 			log.Debugln("Error decoding cookie value for", key, err)
-			state.setSession(key, "", w)
 		}
 	} else if err != http.ErrNoCookie {
 		log.Debugln("Error reading cookie", key, err)
@@ -288,7 +224,7 @@ func (state *State) clearFlash(w http.ResponseWriter) {
 }
 
 func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
-	sessionID := state.readSession(cookieUser, w, r)
+	sessionID := state.readSession(cookieUser, r)
 	// If there is a session cookie, get the associated user from the DB
 	if sessionID != "" {
 		username = state.DB.GetSessionID(sessionID)
@@ -296,55 +232,27 @@ func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter
 	return username
 }
 
-/*
-func (state *State) getRedirectFromCookie(r *http.Request, w http.ResponseWriter) (redirURL string) {
-	redirURL = state.readSession(cookieRedirect, w, r)
+// GetRedirect returns the URL from the redirect cookie
+func (state *State) GetRedirect(r *http.Request, w http.ResponseWriter) (redirURL string) {
+	redirURL = state.readSession(cookieRedirect, r)
 	if redirURL != "" {
 		state.clearSession(cookieRedirect, w)
 	}
 	return redirURL
 }
-*/
 
 func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
-	message = state.readSession(cookieFlash, w, r)
+	message = state.readSession(cookieFlash, r)
 	if message != "" {
 		state.clearFlash(w)
 	}
 	return message
 }
 
-/*
-func (state *State) Userlist() ([]string, error) {
-	return state.Backend.Userlist()
-}
-
-func (state *State) GetUserInfo(username string) *User {
-	return state.Backend.GetUserInfo(username)
-}
-*/
-
-/*
-// GetUsername retrieves username, and admin bool from context
-func GetUsername(c context.Context) (username, role string) {
-	//defer timeTrack(time.Now(), "GetUsername")
-	userC, ok := fromUserContext(c)
-	if !ok {
-		userC = &User{}
-	}
-	if ok {
-		username = userC.Username
-		role = userC.Role
-	}
-
-	return username, role
-}
-*/
-
 // IsLoggedIn takes a context, tries to fetch user{} from it,
 //  and if that succeeds, verifies the username fetched actually exists
-func IsLoggedIn(c context.Context) bool {
-	u := GetUserState(c)
+func (state *State) IsLoggedIn(r *http.Request) bool {
+	u := state.GetUserState(r)
 	if u != nil {
 		return true
 	}
@@ -353,54 +261,24 @@ func IsLoggedIn(c context.Context) bool {
 
 // GetUserState returns a *User from the context
 // The *User should have been crammed in there by UserEnvMiddle
-func GetUserState(c context.Context) *User {
-	userC, ok := userFromContext(c)
-	if ok {
-		return userC
+func (state *State) GetUserState(r *http.Request) *User {
+	sessionID := state.readSession(cookieUser, r)
+	if sessionID == "" {
+		//log.Println("No session ID in cookie")
+		return nil
 	}
-	if !checkContext(c) {
-		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
+	username := state.DB.GetSessionID(sessionID)
+	user := state.DB.getUserInfo(username)
+	if user == nil {
+		log.Println("User{} is blank for user:", username)
+		return nil
 	}
-	/*
-		if !ok {
-			debugln("No UserState in context.")
-			pc, fn, line, ok := runtime.Caller(1)
-			details := runtime.FuncForPC(pc)
-			if ok && details != nil {
-				log.Printf("[auth.error] in %s[%s:%d]", details.Name(), fn, line)
-			}
-		}
-	*/
-	return nil
+	return user
 }
 
 // GetFlash retrieves token from context
-func GetFlash(c context.Context) string {
-	//defer timeTrack(time.Now(), "GetUsername")
-	var flash string
-	t, ok := flashFromContext(c)
-	if !ok {
-		flash = ""
-	}
-	if ok {
-		flash = t
-	}
-	if !checkContext(c) {
-		log.Println("ERR: UserEnvMiddle is not being used. It is necessary to setup the context.")
-	}
-	return flash
-}
-
-func newCheckInContext(c context.Context) context.Context {
-	return context.WithValue(c, ChkKey, true)
-}
-
-func checkContext(c context.Context) bool {
-	_, ok := c.Value(ChkKey).(bool)
-	if ok {
-		return true
-	}
-	return false
+func (state *State) GetFlash(r *http.Request, w http.ResponseWriter) string {
+	return state.getFlashFromCookie(r, w)
 }
 
 // IsAdmin checks if the given user is an admin
@@ -413,16 +291,6 @@ func (u *User) IsAdmin() bool {
 
 	return false
 }
-
-/*
-// GetName returns the user's Name
-func (u *User) GetName() string {
-	if u != nil {
-		return u.Name
-	}
-	return ""
-}
-*/
 
 // Auth authenticates a given username and password
 func (db *DB) Auth(username, password string) bool {
@@ -522,7 +390,7 @@ func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
 
 // LogoutHandler clears the "user" cookie, logging the user out
 func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	sessionID := state.readSession(cookieUser, w, r)
+	sessionID := state.readSession(cookieUser, r)
 	state.DB.DeleteSessionID(sessionID)
 	state.clearSession(cookieUser, w)
 	http.Redirect(w, r, r.Referer(), 302)
@@ -670,7 +538,7 @@ func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 // AuthMiddle is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
 func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !IsLoggedIn(r.Context()) {
+		if !state.IsLoggedIn(r) {
 			Redirect(state, w, r)
 		}
 		next.ServeHTTP(w, r)
@@ -680,7 +548,7 @@ func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
 // AuthMiddleHandler is a middleware to protect a given handler; users only access
 func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !IsLoggedIn(r.Context()) {
+		if !state.IsLoggedIn(r) {
 			Redirect(state, w, r)
 		}
 		next.ServeHTTP(w, r)
@@ -690,9 +558,9 @@ func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 // AuthAdminMiddle is a middleware to protect a given handler; admin only access
 func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := GetUserState(r.Context())
+		user := state.GetUserState(r)
 		//if username == "" {
-		if !IsLoggedIn(r.Context()) {
+		if !state.IsLoggedIn(r) {
 			Redirect(state, w, r)
 		}
 		//If user is not an Admin, just redirect to index
@@ -705,49 +573,6 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 	})
 }
-
-//CtxMiddle grabs username, role, and flash message from cookie,
-// tosses it into the context for use in various other middlewares
-// Note: It grabs simply the username, and stores a full User{} in the context
-func (state *State) CtxMiddle(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		username := state.getUsernameFromCookie(r, w)
-		message := state.getFlashFromCookie(r, w)
-
-		// Escape messages here, so the user does not have to
-		//safeMessage := template.HTMLEscapeString(message)
-
-		newc := r.Context()
-
-		// Add a little flag to tell whether this middleware has been hit
-		newc = newCheckInContext(newc)
-
-		if username != "" {
-			newc = state.NewUserInContext(newc, username)
-		}
-
-		// Continue to depend on whether message was blank, in case HTMLEscapeEstring adds something
-		if message != "" {
-			newc = NewFlashInContext(newc, message)
-		}
-
-		next.ServeHTTP(w, r.WithContext(newc))
-	})
-}
-
-/*
-func (state *State) AuthCookieMiddle(next http.HandlerFunc) http.HandlerFunc {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		username := state.getUsernameFromCookie(r, w)
-		if username == "" {
-			http.Redirect(w, r, "http://"+r.Host+"/login"+"?url="+r.URL.String(), 302)
-			return
-		}
-		next.ServeHTTP(w, r)
-	}
-	return http.HandlerFunc(handler)
-}
-*/
 
 func (db *DB) dbInit() {
 	boltDB := db.getDB()
@@ -821,9 +646,44 @@ func (db *DB) dbInit() {
 	}
 }
 
-//UserSignupPostHandler only handles POST requests, using forms named "username", "password", and "register_key"
+//UserSignupPostHandler only handles POST requests, using forms named "username", "password"
 // Signing up users as necessary, inside the AuthConf
 func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+	case "POST":
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		err := state.NewUser(username, password)
+		if err != nil {
+			log.Debugln("Error adding user:", err)
+			state.SetFlash("Error adding user. Check logs.", w)
+			http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
+			return
+		}
+
+		// Login the recently added user
+		if state.Auth(username, password) {
+			state.Login(username, w)
+		}
+
+		state.SetFlash("Successfully added '"+username+"' user.", w)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+
+	case "PUT":
+		// Update an existing record.
+	case "DELETE":
+		// Remove the record.
+	default:
+		// Give an error message.
+	}
+}
+
+//UserSignupTokenPostHandler only handles POST requests, using forms named "username", "password", and "register_key"
+//	This is an alternative to UserSignupPostHandler, adding registration token support
+//  That token is verified against the DB before registration
+func (state *State) UserSignupTokenPostHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 	case "POST":
@@ -872,96 +732,6 @@ func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request
 	}
 }
 
-/* THIS HANDLER STUFF SHOULD ALL BE TAKEN CARE OF IN THE APPS; LEAVING FOR EXAMPLES:
-
-//AdminUserPassChangePostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *State) AdminUserPassChangePostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
-		// Hash password now so if it fails we catch it before touching Bolt
-		//hash, err := passlib.Hash(password)
-		hash, err := HashPassword([]byte(password))
-		if err != nil {
-			// couldn't hash password for some reason
-			check(err)
-			state.setSession(cookieFlash, "Error hashing password. Check logs.", w)
-			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		}
-		err = state.UpdatePass(username, hash)
-		if err != nil {
-			check(err)
-			state.setSession(cookieFlash, "Error updating password. Check logs.", w)
-			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		}
-		state.setSession(cookieFlash, "Successfully changed '"+username+"' users password.", w)
-		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		return
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//AdminUserDeletePostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *State) AdminUserDeletePostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		err := state.DeleteUser(username)
-		if err != nil {
-			check(err)
-			state.setSession(cookieFlash, "Error deleting user. Check logs.", w)
-			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		}
-		state.setSession(cookieFlash, "Successfully deleted '"+username+"'.", w)
-		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		return
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//SignupPostHandler only handles POST requests, using forms named "username" and "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *State) SignupPostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := template.HTMLEscapeString(r.FormValue("username"))
-		password := template.HTMLEscapeString(r.FormValue("password"))
-		err := state.NewUser(username, password)
-		if err != nil {
-			check(err)
-			state.setSession(cookieFlash, "User registration failed.", w)
-			http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-			return
-		}
-		state.setSession(cookieFlash, "Successful user registration.", w)
-		http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
-		return
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-*/
-
 //LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
 // Comparing values with those in BoltDB, and if it passes, stores the verified username in the cookie
 // Note: As opposed to the other Handlers above, now commented out, this one deals with the redirects, so worth handling in the library.
@@ -978,13 +748,13 @@ func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			state.Login(username, w)
 			state.SetFlash("User '"+username+"' successfully logged in.", w)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
-			redirURL := state.readSession(cookieRedirect, w, r)
+			redirURL := state.readSession(cookieRedirect, r)
 			if redirURL != "" {
 				state.clearSession(cookieRedirect, w)
 				http.Redirect(w, r, redirURL, http.StatusSeeOther)
 				return
 			}
-			http.Redirect(w, r, "/index", http.StatusSeeOther)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)

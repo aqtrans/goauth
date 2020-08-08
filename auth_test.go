@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -87,60 +86,6 @@ func TestBolt(t *testing.T) {
 	}
 }
 
-func TestContext(t *testing.T) {
-	// Try fetching without anything in the context first
-	ctx := context.Background()
-
-	ctx = newCheckInContext(ctx)
-
-	userState := GetUserState(ctx)
-	if userState != nil {
-		t.Error("userState from context is not nil")
-	}
-
-	if IsLoggedIn(ctx) {
-		t.Error("IsLoggedIn from context is not false")
-	}
-
-	userState2 := GetUserState(ctx)
-	if userState2 != nil {
-		t.Error("userState2.username has something in it")
-	}
-
-	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
-	authState.NewAdmin("admin", "admin")
-
-	ctx = authState.NewUserInContext(ctx, "admin")
-
-	user2 := GetUserState(ctx)
-	if user2.Name != "admin" {
-		t.Error("username2 from context does not equal admin")
-	}
-	if !user2.IsAdmin() {
-		t.Error("isAdmin2 from context is not true")
-	}
-
-	if !IsLoggedIn(ctx) {
-		t.Error("IsLoggedIn from context is not true")
-	}
-
-	userC2 := GetUserState(ctx)
-	if userC2.Name != "admin" {
-		t.Error("userC2.username does not equal admin")
-	}
-
-	f := "message"
-	ctx = NewFlashInContext(ctx, f)
-
-	msgC := GetFlash(ctx)
-	if msgC != f {
-		t.Error("msgC does not equal f")
-	}
-
-}
-
 func TestCookies(t *testing.T) {
 
 	tmpdb := tempfile()
@@ -153,7 +98,7 @@ func TestCookies(t *testing.T) {
 
 	request := &http.Request{Header: http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}}
 
-	if authState.readSession("omg", w, request) != "testing" {
+	if authState.readSession("omg", request) != "testing" {
 		t.Error("Cookie value is unable to be decoded")
 	}
 
@@ -212,11 +157,11 @@ func TestSuccessfulLogin(t *testing.T) {
 	authState.LoginPostHandler(w, request)
 	request.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
 
-	//t.Log(w.HeaderMap["Set-Cookie"])
+	t.Log(w.HeaderMap["Set-Cookie"])
 
-	if w.Header().Get("Location") != "/index" {
+	if w.Header().Get("Location") != "/" {
 		t.Log(w.HeaderMap)
-		t.Log(authState.readSession("flash", w, request))
+		t.Log(authState.readSession("flash", request))
 		t.Error("Successful login was not redirected to /")
 	}
 
@@ -422,7 +367,7 @@ func TestAuthMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.CtxMiddle(authState.AuthMiddle(test))
+	handler := authState.AuthMiddle(test)
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == "/login" {
@@ -466,7 +411,7 @@ func TestAuthMiddle2(t *testing.T) {
 	})
 	t.Log(w.HeaderMap)
 
-	handler := authState.CtxMiddle(authState.AuthMiddle(test))
+	handler := authState.AuthMiddle(test)
 	handler.ServeHTTP(w, request)
 
 	if w.Header().Get("Location") != "/login" {
@@ -519,7 +464,7 @@ func TestAuthAdminMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.CtxMiddle(authState.AuthAdminMiddle(test))
+	handler := authState.AuthAdminMiddle(test)
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == "/login" {
@@ -577,7 +522,7 @@ func TestAuthAdminMiddle2(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.CtxMiddle(authState.AuthAdminMiddle(test))
+	handler := authState.AuthAdminMiddle(test)
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") != "/" {
