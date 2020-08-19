@@ -268,6 +268,10 @@ func (state *State) GetUserState(r *http.Request) *User {
 		return nil
 	}
 	username := state.DB.GetSessionID(sessionID)
+	if username == "" {
+		log.Println("Invalid session ID given")
+		return nil
+	}
 	user := state.DB.getUserInfo(username)
 	if user == nil {
 		log.Println("User{} is blank for user:", username)
@@ -946,18 +950,22 @@ func (db *DB) GetSessionID(sessionID string) string {
 	defer db.releaseDB()
 
 	var usernameByte []byte
+	noSessionID := errors.New("session ID does not exist")
 
 	err := boltDB.View(func(tx *bolt.Tx) error {
 
 		b := tx.Bucket([]byte(sessionIDsBucketName))
 		v := b.Get([]byte(sessionID))
 		if v == nil {
-			return errors.New("session ID does not exist")
+			return noSessionID
 		}
 		usernameByte = make([]byte, len(v))
 		copy(usernameByte, v)
 		return nil
 	})
+	if err == noSessionID {
+		return ""
+	}
 	if err != nil {
 		log.Fatalln("auth.GetSessionID() Boltdb error:", err)
 	}
