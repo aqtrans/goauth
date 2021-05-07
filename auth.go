@@ -62,11 +62,6 @@ type DB struct {
 	path   string
 }
 
-type authInfo struct {
-	hashKey  []byte
-	blockKey []byte
-}
-
 // User is what is stored inside the context
 type User struct {
 	Name string
@@ -253,10 +248,8 @@ func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (
 //  and if that succeeds, verifies the username fetched actually exists
 func (state *State) IsLoggedIn(r *http.Request) bool {
 	u := state.GetUserState(r)
-	if u != nil {
-		return true
-	}
-	return false
+
+	return u != nil
 }
 
 // GetUserState returns a *User from the context
@@ -397,7 +390,7 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := state.readSession(cookieUser, r)
 	state.DB.DeleteSessionID(sessionID)
 	state.clearSession(cookieUser, w)
-	http.Redirect(w, r, r.Referer(), 302)
+	http.Redirect(w, r, r.Referer(), http.StatusFound)
 }
 
 // NewUser creates a new user with a given plaintext username and password
@@ -536,7 +529,6 @@ func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	state.setSession(cookieRedirect, r.URL.Path, w)
 	// Redirect to the login page, should be at LoginPath
 	http.Redirect(w, r, LoginPath, http.StatusSeeOther)
-	return
 }
 
 // AuthMiddle is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
@@ -809,6 +801,8 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 
 	var userRole []byte
 
+	invalidToken := errors.New("token does not exist")
+
 	err := boltDB.View(func(tx *bolt.Tx) error {
 
 		// Check if no users exist and token is blank. If so, bypass token check
@@ -820,13 +814,17 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 		b := tx.Bucket([]byte(registerKeysBucketName))
 		v := b.Get([]byte(token))
 		if v == nil {
-			return errors.New("token does not exist")
+			return invalidToken
 		}
 		userRole = make([]byte, len(v))
 		copy(userRole, v)
 		return nil
 	})
-	if err != nil {
+
+	if err == invalidToken {
+		return false, ""
+	}
+	if err != nil && err != invalidToken {
 		log.Fatalln("ValidateRegisterToken() Boltdb error:", err)
 	}
 
