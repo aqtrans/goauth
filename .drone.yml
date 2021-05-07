@@ -1,0 +1,38 @@
+kind: pipeline
+name: auth
+
+steps:
+- name: get deps
+  image: golang
+  volumes:
+    - name: deps
+      path: /go
+  commands:
+    - go get -d
+
+- name: test
+  image: golang
+  volumes:
+    - name: deps
+      path: /go
+  commands:      
+    - go test
+    - go test -race
+    - go test -cover
+    - go test -bench=.
+
+- name: notify
+  image: plugins/pushover
+  settings:
+    user:
+      from_secret: pushover_user
+    token:
+      from_secret: pushover_token
+  when:
+    status:
+    - success
+    - failure
+
+volumes:
+  - name: deps
+    temp: {}  
