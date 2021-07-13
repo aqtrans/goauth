@@ -289,6 +289,11 @@ func (u *User) IsAdmin() bool {
 	return false
 }
 
+// IsLoggedIn checks if the given User is valid
+func (u *User) IsValid() bool {
+	return u != nil
+}
+
 // Auth authenticates a given username and password
 func (db *DB) Auth(username, password string) bool {
 
