@@ -878,7 +878,7 @@ func (db *DB) getCSRFKey() []byte {
 
 // CSRFProtect wraps gorilla/csrf.Protect, only allowing toggling the Secure option
 func (state *State) CSRFProtect(secure bool) func(http.Handler) http.Handler {
-	return csrf.Protect(state.getCSRFKey(), csrf.Secure(secure))
+	return csrf.Protect(state.getCSRFKey(), csrf.Secure(secure), csrf.Path("/"))
 }
 
 // CSRFTemplateField wraps gorilla/csrf.TemplateField
