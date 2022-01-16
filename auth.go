@@ -600,6 +600,25 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+// AuthAdminMiddleHandler is a middleware to protect a given handler; admin only access
+func (state *State) AuthAdminMiddleHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := state.GetUser(r)
+		//if username == "" {
+		if !state.IsLoggedIn(r) {
+			Redirect(state, w, r)
+		}
+		//If user is not an Admin, just redirect to index
+		if !user.IsAdmin() {
+			//log.Println(user.Name + " attempting to access " + r.URL.Path)
+			state.SetFlash("Sorry, you are not allowed to see that.", w)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (db *DB) dbInit() {
 	boltDB := db.getDB()
 	defer db.releaseDB()
