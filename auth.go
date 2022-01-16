@@ -196,7 +196,7 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 			Value:    encoded,
 			Path:     "/",
 			HttpOnly: true,
-			SameSite: http.SameSiteDefaultMode,
+			SameSite: http.SameSiteStrictMode,
 		}
 		http.SetCookie(w, cookie)
 	} else {
@@ -269,7 +269,7 @@ func (state *State) IsLoggedIn(r *http.Request) bool {
 	}
 	user := state.GetSessionUser(sessionID)
 	if user == nil {
-		log.Println("Invalid session ID given")
+		//log.Println("Invalid session ID given")
 		return false
 	}
 	return true
@@ -283,11 +283,11 @@ func (state *State) GetUser(r *http.Request) *User {
 		return nil
 	}
 
-	log.Println("GetUser session ID:", sessionID)
+	//log.Println("GetUser session ID:", sessionID)
 
 	user := state.GetSessionUser(sessionID)
 	if user == nil {
-		log.Println("Invalid session ID given")
+		//log.Println("Invalid session ID given")
 		return nil
 	}
 	return user
@@ -342,7 +342,7 @@ func (db *DB) Auth(username, password string) bool {
 	if err != nil {
 		// Incorrect password, malformed hash, etc.
 		// Should not be a fatal error
-		log.Println("error verifying password for user ", username, err)
+		//log.Println("error verifying password for user ", username, err)
 		return false
 	}
 	// TODO: Should look into fleshing this out
@@ -519,7 +519,7 @@ func (db *DB) DeleteUser(username string) error {
 	defer db.releaseDB()
 
 	err := boltdb.Update(func(tx *bolt.Tx) error {
-		log.Println(username + " has been deleted")
+		//log.Println(username + " has been deleted")
 		return tx.Bucket([]byte(userInfoBucketName)).DeleteBucket([]byte(username))
 	})
 	if err != nil {
@@ -546,7 +546,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 		if err != nil {
 			return err
 		}
-		log.Println("User " + username + " has changed their password.")
+		//log.Println("User " + username + " has changed their password.")
 		return nil
 	})
 	return err
@@ -591,7 +591,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		}
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
-			log.Println(user.Name + " attempting to access " + r.URL.Path)
+			//log.Println(user.Name + " attempting to access " + r.URL.Path)
 			state.SetFlash("Sorry, you are not allowed to see that.", w)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
@@ -628,7 +628,7 @@ func (db *DB) dbInit() {
 
 		hashKey := infobucket.Get([]byte(hashKeyName))
 		if hashKey == nil {
-			log.Println("Throwing hashkey into auth.db.")
+			//log.Println("Throwing hashkey into auth.db.")
 			// Generate a random hashKey
 			hashKey := randBytes(64)
 
@@ -641,7 +641,7 @@ func (db *DB) dbInit() {
 
 		blockKey := infobucket.Get([]byte(blockKeyName))
 		if blockKey == nil {
-			log.Println("Throwing blockkey into auth.db.")
+			//log.Println("Throwing blockkey into auth.db.")
 			// Generate a random blockKey
 			blockKey := randBytes(32)
 
@@ -654,7 +654,7 @@ func (db *DB) dbInit() {
 
 		csrfKey := infobucket.Get([]byte(csrfKeyName))
 		if csrfKey == nil {
-			log.Println("Throwing csrfKey into auth.db.")
+			//log.Println("Throwing csrfKey into auth.db.")
 			// Generate a random csrfKey
 			csrfKey := randBytes(32)
 
@@ -818,7 +818,7 @@ func (state *State) AnyUsers() bool {
 // PutSessionID generates a session ID and ties the ID to the given User
 func (state *State) PutSessionID(user *User) string {
 	sessionID := randString(128)
-	log.Println("PutSessionID session ID for", user.Name, ":", sessionID)
+	//log.Println("PutSessionID session ID for", user.Name, ":", sessionID)
 	boltDB := state.DB.getDB()
 	defer state.DB.releaseDB()
 
@@ -889,7 +889,7 @@ func (db *DB) GetSessionUser(sessionID string) *User {
 	}
 
 	if int(time.Now().Unix()) > decodedToken.ExpirationTime {
-		log.Println("token has expired! Deleting session ID")
+		//log.Println("token has expired! Deleting session ID")
 		db.DeleteSessionID(sessionID)
 	}
 
@@ -1011,7 +1011,7 @@ func (db *DB) expireSessions() {
 	}
 
 	for _, token := range expired {
-		log.Println("deleting session", string(token))
+		//log.Println("deleting session", string(token))
 		db.DeleteSessionID(string(token))
 	}
 
@@ -1024,7 +1024,7 @@ func (s *State) StartCleanup() {
 	for {
 		select {
 		case <-ticker.C:
-			log.Println("expiring sessions...")
+			//log.Println("expiring sessions...")
 			s.DB.expireSessions()
 		case <-stopCleanup:
 			ticker.Stop()
@@ -1053,7 +1053,7 @@ func (s *State) RefreshTokens(next http.Handler) http.Handler {
 
 		if int(time.Now().Add(refreshTime).Unix()) > sessionToken.ExpirationTime {
 
-			log.Println("refreshing token", sessionID)
+			//log.Println("refreshing token", sessionID)
 
 			newSessionID := s.PutSessionID(&sessionToken.User)
 
