@@ -9,6 +9,8 @@ import (
 	//"net/url"
 	"os"
 	"testing"
+
+	log "github.com/sirupsen/logrus"
 )
 
 /*
@@ -18,7 +20,7 @@ func init() {
 */
 
 // tempfile returns a temporary file path.
-func tempfile() string {
+func tempfile() Config {
 	f, err := ioutil.TempFile("", "bolt-")
 	if err != nil {
 		panic(err)
@@ -29,14 +31,17 @@ func tempfile() string {
 	if err := os.Remove(f.Name()); err != nil {
 		panic(err)
 	}
-	return f.Name()
+	cfg := Config{
+		DbPath: f.Name(),
+	}
+	return cfg
 }
 
 func TestBolt(t *testing.T) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
 
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	_, err := authState.Userlist()
 	if err != nil {
@@ -94,7 +99,7 @@ func TestCookies(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	w := httptest.NewRecorder()
 
@@ -112,25 +117,39 @@ func TestFailedLogin(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	// Attempt a bad login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+	username := "admin1"
+	password := "admin1"
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
+		// Check if we have a redirect URL in the cookie, if so redirect to it
+		redirURL := authState.readSession(cookieRedirect, r)
+		if redirURL != "" {
+			authState.clearSession(cookieRedirect, w)
+			http.Redirect(w, r, redirURL, http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin1")
-	request.Form.Add("password", "admin1")
-	authState.LoginPostHandler(w, request)
-	request.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
+	authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+	http.Redirect(w, r, authState.Cfg.LoginPath, http.StatusSeeOther)
+	r.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
 
 	//t.Log(w.HeaderMap["Set-Cookie"])
 
-	// Fail if we are not redirected to /login
-	if w.Header().Get("Location") != "/login" {
-		t.Error("Failed login was not redirected to /login")
+	wanted := authState.Cfg.LoginPath
+	got := w.Header().Get("Location")
+
+	// Fail if we are not redirected to authState.Cfg.LoginPath
+	if got != wanted {
+		t.Errorf("Failed login was not redirected to LoginPath: %v", w.Header().Get("Location"))
 	}
 
 	/* TODO: Once I'm using some CONSTs for returned cookie flash messages, check for that "flash" returns ErrFailedLogin or whatever it is
@@ -145,27 +164,43 @@ func TestSuccessfulLogin(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
-	authState.NewAdmin("admin", "admin")
+	username := "admin1"
+	password := "admin1"
+
+	err := authState.NewAdmin(username, password)
+	if err != nil {
+		t.Error(err)
+	}
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
+		// Check if we have a redirect URL in the cookie, if so redirect to it
+		redirURL := authState.readSession(cookieRedirect, r)
+		if redirURL != "" {
+			authState.clearSession(cookieRedirect, w)
+			http.Redirect(w, r, redirURL, http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	authState.LoginPostHandler(w, request)
-	request.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
+	authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+	http.Redirect(w, r, authState.Cfg.LoginPath, http.StatusSeeOther)
+	r.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
 
 	t.Log(w.Result().Header["Set-Cookie"])
 
 	if w.Header().Get("Location") != "/" {
 		t.Log(w.Result().Header)
-		t.Log(authState.readSession("flash", request))
+		t.Log(authState.readSession("flash", r))
 		t.Error("Successful login was not redirected to /")
 	}
 
@@ -181,7 +216,7 @@ func TestInvalidRole(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	err := authState.newUser("admin", "admin", "omg")
 	if err == nil {
@@ -193,29 +228,40 @@ func TestClearSession(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	authState.NewAdmin("admin", "admin")
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Error("error performing request")
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+	username := "admin1"
+	password := "admin1"
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
+		// Check if we have a redirect URL in the cookie, if so redirect to it
+		redirURL := authState.readSession(cookieRedirect, r)
+		if redirURL != "" {
+			authState.clearSession(cookieRedirect, w)
+			http.Redirect(w, r, redirURL, http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	authState.LoginPostHandler(w, request)
+	authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+	http.Redirect(w, r, authState.Cfg.LoginPath, http.StatusSeeOther)
 
 	// After a good login, copy Cookie into a new request
-	request.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
+	r.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
 	// Create a new recorder to get a clean HeaderMap that should then come back Expired and such
 	w2 := httptest.NewRecorder()
 
-	authState.LogoutHandler(w2, request)
+	authState.LogoutHandler(w2, r)
 
-	request.Header = http.Header{"Cookie": w2.Result().Header["Set-Cookie"]}
+	r.Header = http.Header{"Cookie": w2.Result().Header["Set-Cookie"]}
 
 	finalRequest := &http.Request{Header: http.Header{"Cookie": w2.Result().Header["Set-Cookie"]}}
 	cookie, err := finalRequest.Cookie("user")
@@ -239,32 +285,33 @@ func TestReadSession(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
-	authState.NewAdmin("admin", "admin")
+	username := "admin1"
+	password := "admin1"
+
+	authState.NewAdmin(username, password)
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	authState.LoginPostHandler(w, request)
-
 	// After a good login, copy Cookie into a new request
-	request.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
+	r.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
 
-	user := authState.getUsernameFromCookie(request, w)
-	if user != "admin" {
+	user := authState.GetUser(r)
+	if user.Name != username {
 		t.Error("getUsernameFromCookie did not properly return admin: ", user)
 	}
 
-	request.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
-	flash := authState.getFlashFromCookie(request, w)
-	if flash != "User 'admin' successfully logged in." {
+	r.Header = http.Header{"Cookie": w.Result().Header["Set-Cookie"]}
+	flash := authState.GetFlash(r, w)
+	if flash != "User 'admin1' successfully logged in." {
 		t.Error("Flash message is not a successful login message.")
 	}
 
@@ -280,7 +327,7 @@ func TestReadUserInfo(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	err := authState.NewAdmin("admin", "admin")
 	if err != nil {
@@ -328,7 +375,7 @@ func TestRedirect(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	authState.NewAdmin("admin", "admin")
 
@@ -364,20 +411,22 @@ func TestAuthMiddle1(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
-	authState.NewAdmin("admin", "admin")
+	username := "admin1"
+	password := "admin1"
+
+	authState.NewAdmin(username, password)
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	authState.LoginPostHandler(w, request)
 
 	// After a good login, copy Cookie into a new request
 	request2, err := http.NewRequest("GET", "/index", nil)
@@ -395,7 +444,7 @@ func TestAuthMiddle1(t *testing.T) {
 	handler := authState.AuthMiddle(test)
 	handler.ServeHTTP(w2, request2)
 
-	if w2.Header().Get("Location") == "/login" {
+	if w2.Header().Get("Location") == authState.Cfg.LoginPath {
 		t.Log(w2.Result().Header)
 		t.Error("AuthMiddle redirected to /login even after successful login.")
 	}
@@ -420,28 +469,32 @@ func TestAuthMiddle2(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
-	authState.NewAdmin("admin", "admin")
+	username := "admin1"
+	password := "admin1"
+
+	authState.NewAdmin(username, password)
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("GET", "/index", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
 	}
 
 	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("omg"))
 	})
-	t.Log(w.Result().Header)
 
 	handler := authState.AuthMiddle(test)
-	handler.ServeHTTP(w, request)
+	handler.ServeHTTP(w, r)
 
-	if w.Header().Get("Location") != "/login" {
-		t.Log(w.Result().Header)
-		t.Error("AuthMiddle did not redirect to /login")
+	if w.Result().StatusCode != http.StatusOK {
+		t.Error("AuthMiddle did not allow us through")
 	}
 
 	/*
@@ -464,20 +517,33 @@ func TestAuthAdminMiddle1(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
-	authState.NewAdmin("admin", "admin")
+	username := "admin1"
+	password := "admin1"
+
+	authState.NewAdmin(username, password)
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
+		// Check if we have a redirect URL in the cookie, if so redirect to it
+		redirURL := authState.readSession(cookieRedirect, r)
+		if redirURL != "" {
+			authState.clearSession(cookieRedirect, w)
+			http.Redirect(w, r, redirURL, http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	authState.LoginPostHandler(w, request)
+	authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+	http.Redirect(w, r, authState.Cfg.LoginPath, http.StatusSeeOther)
 
 	// After a good login, copy Cookie into a new request
 	request2, err := http.NewRequest("GET", "/index", nil)
@@ -520,22 +586,35 @@ func TestAuthAdminMiddle2(t *testing.T) {
 
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
+
+	username := "admin1"
+	password := "admin1"
 
 	// Register 2 users, as first will automatically be an admin
-	authState.NewUser("firstuser", "12345")
+	authState.NewUser(username, password)
 	authState.NewUser("user", "12345")
 
 	// Attempt a good login
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+
+	if authState.Auth(username, password) {
+		authState.Login(username, w)
+		authState.SetFlash("User '"+username+"' successfully logged in.", w)
+		// Check if we have a redirect URL in the cookie, if so redirect to it
+		redirURL := authState.readSession(cookieRedirect, r)
+		if redirURL != "" {
+			authState.clearSession(cookieRedirect, w)
+			http.Redirect(w, r, redirURL, http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "user")
-	request.Form.Add("password", "12345")
-	authState.LoginPostHandler(w, request)
+	authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+	http.Redirect(w, r, authState.Cfg.LoginPath, http.StatusSeeOther)
 
 	// After a good login, copy Cookie into a new request
 	request2, err := http.NewRequest("GET", "/index", nil)
@@ -577,7 +656,7 @@ func TestAuthAdminMiddle2(t *testing.T) {
 func TestRegisterKey(t *testing.T) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	token := authState.GenerateRegisterToken("admin")
 	valid, role := authState.ValidateRegisterToken(token)
@@ -598,7 +677,7 @@ func TestRegisterKey(t *testing.T) {
 func TestRegisterKey2(t *testing.T) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	token := authState.GenerateRegisterToken("Admin")
 	// Test to make sure that invalid roles fallback to user
@@ -611,52 +690,57 @@ func TestRegisterKey2(t *testing.T) {
 	}
 }
 
-func TestUserSignupPostHandler(t *testing.T) {
-	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
-
-	// Generate a register token
-	token := authState.GenerateRegisterToken("admin")
-
-	// Attempt to signup with the token
-	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	request.Form.Add("register_key", token)
-
-	authState.UserSignupPostHandler(w, request)
-
-	if w.Code != http.StatusSeeOther {
-		t.Error("HTTP response code after signup is not 303:", w.Code)
-	}
-}
-
 func TestUserSignupTokenPostHandler(t *testing.T) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	// Generate a register token
 	token := authState.GenerateRegisterToken("admin")
 
 	// Attempt to signup with the token
 	w := httptest.NewRecorder()
-	request, err := http.NewRequest("POST", "/", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Form = url.Values{}
-	request.Form.Add("username", "admin")
-	request.Form.Add("password", "admin")
-	request.Form.Add("register_key", token)
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Form = url.Values{}
+	r.Form.Add("username", "admin")
+	r.Form.Add("password", "admin")
+	r.Form.Add("register_key", token)
 
-	authState.UserSignupTokenPostHandler(w, request)
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+	givenToken := r.FormValue("register_key")
+
+	isValid, userRole := authState.ValidateRegisterToken(givenToken)
+
+	if isValid {
+
+		// Delete the token so it cannot be reused if the token is not blank
+		// The first user can signup without a token and is granted admin rights
+		if givenToken != "" {
+			authState.DeleteRegisterToken(givenToken)
+		} else {
+			userRole = RoleAdmin
+		}
+
+		err := authState.newUser(username, password, userRole)
+		if err != nil {
+			log.Debugln("Error adding user:", err)
+			authState.SetFlash("Error adding user. Check logs.", w)
+			http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
+			return
+		}
+
+		// Login the recently added user
+		if authState.Auth(username, password) {
+			authState.Login(username, w)
+		}
+
+		authState.SetFlash("Successfully added '"+username+"' user.", w)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	} else {
+		authState.SetFlash("Registration token is invalid.", w)
+		http.Redirect(w, r, "/", http.StatusInternalServerError)
+	}
 
 	if w.Code != http.StatusSeeOther {
 		t.Error("HTTP response code after signup is not 303:", w.Code)
@@ -666,7 +750,7 @@ func TestUserSignupTokenPostHandler(t *testing.T) {
 func TestGetCSRFKey(t *testing.T) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	csrfKey := authState.getCSRFKey()
 	if len(csrfKey) == 0 {
@@ -693,7 +777,7 @@ func TestGetCSRFKey(t *testing.T) {
 		}
 	*/
 
-	authState.NewUserToken(w, r)
+	w.Write([]byte("User token:" + authState.GenerateRegisterToken("user")))
 	/*
 		if w.Code != http.StatusFound {
 			t.Error("HTTP response code is not 200.", w.Code)
@@ -712,9 +796,34 @@ func TestUserGetName(t *testing.T) {
 func BenchmarkNewUser(b *testing.B) {
 	tmpdb := tempfile()
 	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
 
 	for i := 0; i < b.N; i++ {
 		authState.NewUser("user", "12345")
 	}
+}
+
+func BenchmarkAuthMiddle(b *testing.B) {
+
+	tmpdb := tempfile()
+	authState := NewAuthState(tmpdb)
+	defer os.Remove(tmpdb.DbPath)
+
+	authState.NewAdmin("admin", "admin")
+
+	// Attempt a good login
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/index", nil)
+
+	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//authState.getUsernameFromCookie(r, w)
+		w.Write([]byte("omg"))
+	})
+
+	handler := authState.AuthMiddle(test)
+
+	for i := 0; i < b.N; i++ {
+		handler.ServeHTTP(w, r)
+	}
+
 }

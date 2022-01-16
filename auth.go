@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -33,8 +34,8 @@ const (
 	registerKeysBucketName = "RegisterKeys"
 	sessionIDsBucketName   = "SessionIDs"
 	// Available roles for users
-	roleAdmin = "admin"
-	roleUser  = "user"
+	RoleAdmin = "admin"
+	RoleUser  = "user"
 	// Names of cookies used
 	cookieUser     = "user"
 	cookieFlash    = "flash"
@@ -44,9 +45,9 @@ const (
 
 var (
 	// LoginPath is the path to the login page, used to redirect protected pages
-	LoginPath = "/login"
+	//LoginPath = "/login"
 	// SignupPath is the path to your signup page, used in the initial registration banner
-	SignupPath          = "/signup"
+	//SignupPath          = "/signup"
 	errUserDoesNotExist = errors.New("User does not exist")
 )
 
@@ -54,6 +55,7 @@ var (
 type State struct {
 	cookie *securecookie.SecureCookie
 	DB
+	Cfg Config
 }
 
 // DB wraps a bolt.DB struct, so I can test and interact with the db from programs using the lib, while vendoring bolt in both places
@@ -68,6 +70,20 @@ type User struct {
 	Role string
 }
 
+type Token struct {
+	User           User
+	ExpirationTime int
+}
+
+type Config struct {
+	CookieSecure bool
+	DbPath       string
+	LoginPath    string
+	SignupPath   string
+	// Session lifetime in hours
+	SessionLifetime int
+}
+
 // GetName is a helper function that sets the user blank if User is nil
 // This allows use in Templates and the like
 func (u *User) GetName() string {
@@ -79,7 +95,7 @@ func (u *User) GetName() string {
 
 func validRole(role string) bool {
 	switch role {
-	case roleAdmin, roleUser:
+	case RoleAdmin, RoleUser:
 		return true
 	default:
 		return false
@@ -104,23 +120,42 @@ func (db *DB) releaseDB() {
 }
 
 // NewAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
-func NewAuthState(path string) *State {
+func NewAuthState(cfg Config) *State {
 	var db *bolt.DB
-	return NewAuthStateWithDB(&DB{authdb: db, path: path}, path)
+	return NewAuthStateWithDB(&DB{authdb: db, path: cfg.DbPath}, cfg)
 }
 
 // NewAuthStateWithDB takes an instance of a boltDB, and returns an AuthState using the BoltDB backend
-func NewAuthStateWithDB(db *DB, path string) *State {
-	if path == "" {
+func NewAuthStateWithDB(db *DB, cfg Config) *State {
+	if cfg.DbPath == "" {
 		log.Fatalln(errors.New("NewAuthStateWithDB: path is blank"))
 	}
 
+	if cfg.LoginPath == "" {
+		cfg.LoginPath = "/login"
+	}
+
+	if cfg.SignupPath == "" {
+		cfg.SignupPath = "/signup"
+	}
+
+	if cfg.SessionLifetime == 0 {
+		cfg.SessionLifetime = 10
+	}
+
+	log.SetLevel(log.TraceLevel)
+
 	db.dbInit()
 
-	return &State{
+	state := &State{
 		cookie: securecookie.New(db.getAuthInfo()),
 		DB:     *db,
+		Cfg:    cfg,
 	}
+
+	//go state.StartCleanup(10 * time.Second)
+
+	return state
 }
 
 // RandBytes generates a random amount of bytes given a specified length
@@ -183,7 +218,8 @@ func (state *State) SetFlash(msg string, w http.ResponseWriter) {
 // Login generates a random session ID, throws that into the DB,
 //   then sets that session ID into the cookie
 func (state *State) Login(username string, w http.ResponseWriter) {
-	sessionID := state.DB.PutSessionID(username)
+	user := state.DB.getUserInfo(username)
+	sessionID := state.PutSessionID(user)
 	state.setSession(cookieUser, sessionID, w)
 }
 
@@ -218,15 +254,6 @@ func (state *State) clearFlash(w http.ResponseWriter) {
 	state.clearSession(cookieFlash, w)
 }
 
-func (state *State) getUsernameFromCookie(r *http.Request, w http.ResponseWriter) (username string) {
-	sessionID := state.readSession(cookieUser, r)
-	// If there is a session cookie, get the associated user from the DB
-	if sessionID != "" {
-		username = state.DB.GetSessionID(sessionID)
-	}
-	return username
-}
-
 // GetRedirect returns the URL from the redirect cookie
 func (state *State) GetRedirect(r *http.Request, w http.ResponseWriter) (redirURL string) {
 	redirURL = state.readSession(cookieRedirect, r)
@@ -236,38 +263,32 @@ func (state *State) GetRedirect(r *http.Request, w http.ResponseWriter) (redirUR
 	return redirURL
 }
 
-func (state *State) getFlashFromCookie(r *http.Request, w http.ResponseWriter) (message string) {
-	message = state.readSession(cookieFlash, r)
-	if message != "" {
-		state.clearFlash(w)
-	}
-	return message
-}
-
-// IsLoggedIn takes a context, tries to fetch user{} from it,
-//  and if that succeeds, verifies the username fetched actually exists
+// IsLoggedIn simply tries to fetch a session ID from the request
+//   If more user info is required, use GetUser()
 func (state *State) IsLoggedIn(r *http.Request) bool {
-	u := state.GetUserState(r)
-
-	return u != nil
+	sessionID := state.readSession(cookieUser, r)
+	if sessionID == "" {
+		//log.Println("No session ID in cookie")
+		return true
+	}
+	user := state.DB.GetSessionID(sessionID)
+	if user == nil {
+		log.Println("Invalid session ID given")
+		return false
+	}
+	return true
 }
 
-// GetUserState returns a *User from the context
-// The *User should have been crammed in there by UserEnvMiddle
-func (state *State) GetUserState(r *http.Request) *User {
+// GetUserState returns a *User given a session ID cookie inside the request
+func (state *State) GetUser(r *http.Request) *User {
 	sessionID := state.readSession(cookieUser, r)
 	if sessionID == "" {
 		//log.Println("No session ID in cookie")
 		return nil
 	}
-	username := state.DB.GetSessionID(sessionID)
-	if username == "" {
-		log.Println("Invalid session ID given")
-		return nil
-	}
-	user := state.DB.getUserInfo(username)
+	user := state.DB.GetSessionID(sessionID)
 	if user == nil {
-		log.Println("User{} is blank for user:", username)
+		log.Println("Invalid session ID given")
 		return nil
 	}
 	return user
@@ -275,13 +296,17 @@ func (state *State) GetUserState(r *http.Request) *User {
 
 // GetFlash retrieves token from context
 func (state *State) GetFlash(r *http.Request, w http.ResponseWriter) string {
-	return state.getFlashFromCookie(r, w)
+	message := state.readSession(cookieFlash, r)
+	if message != "" {
+		state.clearFlash(w)
+	}
+	return message
 }
 
 // IsAdmin checks if the given user is an admin
 func (u *User) IsAdmin() bool {
 	if u != nil {
-		if u.Role == roleAdmin {
+		if u.Role == RoleAdmin {
 			return true
 		}
 	}
@@ -289,7 +314,7 @@ func (u *User) IsAdmin() bool {
 	return false
 }
 
-// IsLoggedIn checks if the given User is valid
+// IsValid checks if the given User is valid
 func (u *User) IsValid() bool {
 	return u != nil
 }
@@ -400,12 +425,12 @@ func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 
 // NewUser creates a new user with a given plaintext username and password
 func (db *DB) NewUser(username, password string) error {
-	return db.newUser(username, password, roleUser)
+	return db.newUser(username, password, RoleUser)
 }
 
 // NewAdmin creates a new admin with a given plaintext username and password
 func (db *DB) NewAdmin(username, password string) error {
-	return db.newUser(username, password, roleAdmin)
+	return db.newUser(username, password, RoleAdmin)
 }
 
 // newUser is a dedicated function to create new users, taking plaintext username, password, and role
@@ -433,7 +458,7 @@ func (db *DB) newUser(username, password, role string) error {
 
 		// Check if no users exist. If so, make this one an admin
 		if masteruserbucket.Stats().KeyN == 0 {
-			role = roleAdmin
+			role = RoleAdmin
 		}
 
 		userbucket := masteruserbucket.Bucket([]byte(username))
@@ -533,7 +558,7 @@ func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	// Save URL in cookie for later use
 	state.setSession(cookieRedirect, r.URL.Path, w)
 	// Redirect to the login page, should be at LoginPath
-	http.Redirect(w, r, LoginPath, http.StatusSeeOther)
+	http.Redirect(w, r, state.Cfg.LoginPath, http.StatusSeeOther)
 }
 
 // AuthMiddle is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
@@ -559,7 +584,7 @@ func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 // AuthAdminMiddle is a middleware to protect a given handler; admin only access
 func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := state.GetUserState(r)
+		user := state.GetUser(r)
 		//if username == "" {
 		if !state.IsLoggedIn(r) {
 			Redirect(state, w, r)
@@ -647,135 +672,12 @@ func (db *DB) dbInit() {
 	}
 }
 
-//UserSignupPostHandler only handles POST requests, using forms named "username", "password"
-// Signing up users as necessary, inside the AuthConf
-func (state *State) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := r.FormValue("username")
-		password := r.FormValue("password")
-
-		err := state.NewUser(username, password)
-		if err != nil {
-			log.Debugln("Error adding user:", err)
-			state.SetFlash("Error adding user. Check logs.", w)
-			http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
-			return
-		}
-
-		// Login the recently added user
-		if state.Auth(username, password) {
-			state.Login(username, w)
-		}
-
-		state.SetFlash("Successfully added '"+username+"' user.", w)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//UserSignupTokenPostHandler only handles POST requests, using forms named "username", "password", and "register_key"
-//	This is an alternative to UserSignupPostHandler, adding registration token support
-//  That token is verified against the DB before registration
-func (state *State) UserSignupTokenPostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		username := r.FormValue("username")
-		password := r.FormValue("password")
-		givenToken := r.FormValue("register_key")
-
-		isValid, userRole := state.ValidateRegisterToken(givenToken)
-
-		if isValid {
-
-			// Delete the token so it cannot be reused if the token is not blank
-			// The first user can signup without a token and is granted admin rights
-			if givenToken != "" {
-				state.DeleteRegisterToken(givenToken)
-			} else {
-				userRole = roleAdmin
-			}
-
-			err := state.newUser(username, password, userRole)
-			if err != nil {
-				log.Debugln("Error adding user:", err)
-				state.SetFlash("Error adding user. Check logs.", w)
-				http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
-				return
-			}
-
-			// Login the recently added user
-			if state.Auth(username, password) {
-				state.Login(username, w)
-			}
-
-			state.SetFlash("Successfully added '"+username+"' user.", w)
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-		} else {
-			state.SetFlash("Registration token is invalid.", w)
-			http.Redirect(w, r, "/", http.StatusInternalServerError)
-		}
-
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
-//LoginPostHandler only handles POST requests, verifying forms named "username" and "password"
-// Comparing values with those in BoltDB, and if it passes, stores the verified username in the cookie
-// Note: As opposed to the other Handlers above, now commented out, this one deals with the redirects, so worth handling in the library.
-func (state *State) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-	case "POST":
-		// Handle login POST request
-		username := r.FormValue("username")
-		password := r.FormValue("password")
-
-		// Login authentication
-		if state.Auth(username, password) {
-			state.Login(username, w)
-			state.SetFlash("User '"+username+"' successfully logged in.", w)
-			// Check if we have a redirect URL in the cookie, if so redirect to it
-			redirURL := state.readSession(cookieRedirect, r)
-			if redirURL != "" {
-				state.clearSession(cookieRedirect, w)
-				http.Redirect(w, r, redirURL, http.StatusSeeOther)
-				return
-			}
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		}
-		state.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
-		http.Redirect(w, r, LoginPath, http.StatusSeeOther)
-		return
-	case "PUT":
-		// Update an existing record.
-	case "DELETE":
-		// Remove the record.
-	default:
-		// Give an error message.
-	}
-}
-
 // GenerateRegisterToken generates a token to register a user, and only a user
 func (db *DB) GenerateRegisterToken(role string) string {
 	switch role {
-	case roleAdmin, roleUser:
+	case RoleAdmin, RoleUser:
 	default:
-		role = roleUser
+		role = RoleUser
 	}
 
 	token := randString(12)
@@ -886,16 +788,6 @@ func CSRFTemplateField(r *http.Request) template.HTML {
 	return csrf.TemplateField(r)
 }
 
-// NewUserToken is a convenient handler that generates and provides a new user registration token
-func (state *State) NewUserToken(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		w.Write([]byte("User token:" + state.GenerateRegisterToken("user")))
-		return
-	default:
-	}
-}
-
 // AnyUsers checks if there are any users in the DB
 // This is useful in application initialization flows
 func (state *State) AnyUsers() bool {
@@ -923,19 +815,30 @@ func (state *State) AnyUsers() bool {
 	return anyUsers
 }
 
-// PutSessionID generates a session ID and ties the ID to the given user
-func (db *DB) PutSessionID(username string) string {
+// PutSessionID generates a session ID and ties the ID to the given User
+func (state *State) PutSessionID(user *User) string {
 	sessionID := randString(128)
-	log.Debugln("PutSessionID session ID for", username, ":", sessionID)
-	boltDB := db.getDB()
-	defer db.releaseDB()
+	log.Debugln("PutSessionID session ID for", user.Name, ":", sessionID)
+	boltDB := state.DB.getDB()
+	defer state.DB.releaseDB()
+
+	expirationTime := time.Now().Add(time.Duration(state.Cfg.SessionLifetime) * time.Second).Unix()
 
 	err := boltDB.Update(func(tx *bolt.Tx) error {
 		sessionsBucket, err := tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
-		err = sessionsBucket.Put([]byte(sessionID), []byte(username))
+
+		encoded, err := json.Marshal(Token{
+			User:           *user,
+			ExpirationTime: int(expirationTime),
+		})
+		if err != nil {
+			return err
+		}
+
+		err = sessionsBucket.Put([]byte(sessionID), encoded)
 		if err != nil {
 			return err
 		}
@@ -947,12 +850,11 @@ func (db *DB) PutSessionID(username string) string {
 	return sessionID
 }
 
-// GetSessionID checks for a given session ID in the DB and returns the associated username
-func (db *DB) GetSessionID(sessionID string) string {
+// GetSessionID checks for a given session ID in the DB and returns the associated User
+func (db *DB) GetSessionID(sessionID string) *User {
 	boltDB := db.getDB()
-	defer db.releaseDB()
 
-	var usernameByte []byte
+	var tokenByte []byte
 	noSessionID := errors.New("session ID does not exist")
 
 	err := boltDB.View(func(tx *bolt.Tx) error {
@@ -962,18 +864,33 @@ func (db *DB) GetSessionID(sessionID string) string {
 		if v == nil {
 			return noSessionID
 		}
-		usernameByte = make([]byte, len(v))
-		copy(usernameByte, v)
+		tokenByte = make([]byte, len(v))
+		copy(tokenByte, v)
 		return nil
 	})
+	db.releaseDB()
 	if err == noSessionID {
-		return ""
+		return nil
 	}
 	if err != nil {
-		log.Fatalln("auth.GetSessionID() Boltdb error:", err)
+		log.Println("auth.GetSessionID() Boltdb error:", err)
+		return nil
 	}
 
-	return string(usernameByte)
+	// decode User
+	var decodedToken Token
+	err = json.Unmarshal(tokenByte, &decodedToken)
+	if err != nil {
+		log.Println("error decoding user:", err)
+		return nil
+	}
+
+	if decodedToken.ExpirationTime > int(time.Now().Unix()) {
+		log.Println("token has expired! Deleting session ID")
+		db.DeleteSessionID(sessionID)
+	}
+
+	return &decodedToken.User
 }
 
 // DeleteSessionID deletes a given session ID
@@ -994,5 +911,85 @@ func (db *DB) DeleteSessionID(sessionID string) {
 	})
 	if err != nil {
 		log.Fatalln("auth.DeleteSessionID() Boltdb error:", err)
+	}
+}
+
+// ListSessions lists all sessions in the DB
+func (db *DB) ListSessions() ([]string, error) {
+	boltdb := db.getDB()
+	defer db.releaseDB()
+
+	var sessionIDlist []string
+	err := boltdb.View(func(tx *bolt.Tx) error {
+		sessionBucket := tx.Bucket([]byte(sessionIDsBucketName))
+		err := sessionBucket.ForEach(func(key, value []byte) error {
+			//fmt.Printf("A %s is %s.\n", key, value)
+			id := string(key)
+			sessionIDlist = append(sessionIDlist, id)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return sessionIDlist, err
+}
+
+func (db *DB) expireSessions() {
+	boltdb := db.getDB()
+
+	var expired [][]byte
+
+	err := boltdb.View(func(tx *bolt.Tx) error {
+		sessionBucket := tx.Bucket([]byte(sessionIDsBucketName))
+		err := sessionBucket.ForEach(func(key, value []byte) error {
+			var sessID Token
+			err := json.Unmarshal(value, &sessID)
+			if err != nil {
+				log.Println("error decoding token json", err)
+				return err
+			}
+
+			log.Println("time:", time.Now().Unix(), sessID.ExpirationTime)
+			if int(time.Now().Unix()) > sessID.ExpirationTime {
+				expired = append(expired, key)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	db.releaseDB()
+
+	if err != nil {
+		log.Println(err)
+		db.releaseDB()
+		return
+	}
+
+	for _, token := range expired {
+		log.Println("deleting session", string(token))
+		db.DeleteSessionID(string(token))
+	}
+
+}
+
+func (s *State) StartCleanup() {
+	stopCleanup := make(chan bool)
+	ticker := time.NewTicker(5 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			log.Println("expiring sessions...")
+			s.DB.expireSessions()
+		case <-stopCleanup:
+			ticker.Stop()
+			return
+		}
 	}
 }
