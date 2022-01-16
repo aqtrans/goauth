@@ -486,6 +486,8 @@ func TestAuthMiddle2(t *testing.T) {
 		authState.SetFlash("User '"+username+"' successfully logged in.", w)
 	}
 
+	r.Header = http.Header{"Cookie": w.HeaderMap["Set-Cookie"]}
+
 	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("omg"))
 	})
