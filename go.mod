@@ -1,4 +1,4 @@
-module git.jba.io/go/auth
+module git.jba.io/go/auth/dev
 
 require (
 	github.com/gorilla/csrf v1.7.0
