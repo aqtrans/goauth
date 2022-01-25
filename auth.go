@@ -842,7 +842,7 @@ func (state *State) PutSessionID(user *User) string {
 	defer state.DB.releaseDB()
 
 	// session lifetime, should be hours:
-	lifetime := time.Duration(state.Cfg.SessionLifetimeHours) * time.Minute
+	lifetime := time.Duration(state.Cfg.SessionLifetimeHours) * time.Hour
 
 	expirationTime := time.Now().Add(lifetime).Unix()
 
