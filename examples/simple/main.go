@@ -12,7 +12,8 @@ import (
 	"net/http"
 
 	"git.jba.io/go/auth"
-	"github.com/dimfeld/httptreemux"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 type env struct {
@@ -29,13 +30,19 @@ func (e *env) indexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var username string
+	user := e.authState.GetUser(r)
+	if user != nil {
+		username = user.Name
+	}
+
 	flashmsg := e.authState.GetFlash(r, w)
 
 	w.Write([]byte(`
 	<html>
 	<body>
 	<p>Flash:` + flashmsg + `</p>
-	Welcome<br>
+	Welcome ` + username + `<br>
 	<a href="/secret">Users Only</a><br>
 	<a href="/login">Login</a><br>
 	<a href="/logout">Logout</a>
@@ -111,11 +118,17 @@ func (e *env) loginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	// Bring up authState
-	a := auth.NewAuthState("./auth.db")
+	c := auth.Config{
+		DbPath:               "./auth.db",
+		SessionLifetimeHours: 5,
+	}
+	a := auth.NewAuthState(c)
 
 	e := &env{
 		authState: *a,
 	}
+
+	go a.StartCleanup()
 
 	// Set flash message
 	//authState.SetFlash("Flash message test...")
@@ -123,17 +136,21 @@ func main() {
 	// Add user
 	//authState.DB.NewAdmin("admin", "test")
 
-	r := httptreemux.NewContextMux()
-	r.GET("/", e.indexHandler)
-	r.GET("/secret", e.authState.AuthMiddle(e.secretHandler))
+	r := chi.NewRouter()
+	r.Use(a.RefreshTokens)
+	r.Use(middleware.Logger)
+	r.Use(middleware.RequestID)
 
-	r.GET("/signup", e.signupHandler)
-	r.POST("/signup_post", e.authState.UserSignupPostHandler)
+	r.Get("/", e.indexHandler)
+	r.Get("/secret", e.authState.AuthMiddle(e.secretHandler))
 
-	r.GET("/login", e.loginHandler)
-	r.POST("/login_post", e.authState.LoginPostHandler)
+	r.Get("/signup", e.signupHandler)
+	r.Post("/signup_post", e.UserSignupPostHandler)
 
-	r.GET("/logout", e.authState.LogoutHandler)
+	r.Get("/login", e.loginHandler)
+	r.Post("/login_post", e.LoginPostHandler)
+
+	r.Get("/logout", e.authState.LogoutHandler)
 
 	http.ListenAndServe("127.0.0.1:5000", r)
 }
