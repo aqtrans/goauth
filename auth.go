@@ -2,7 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
-	"encoding/json"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"html/template"
@@ -10,8 +10,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alexedwards/scs/boltstore"
+	"github.com/alexedwards/scs/v2"
 	"github.com/gorilla/csrf"
-	"github.com/gorilla/securecookie"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -53,7 +54,7 @@ var (
 
 // State holds all required info to get authentication working in the app
 type State struct {
-	cookie *securecookie.SecureCookie
+	sm *scs.SessionManager
 	DB
 	Cfg Config
 }
@@ -70,11 +71,6 @@ type User struct {
 	Role string
 }
 
-type Token struct {
-	User           User
-	ExpirationTime int
-}
-
 type Config struct {
 	CookieSecure bool
 	DbPath       string
@@ -82,6 +78,10 @@ type Config struct {
 	SignupPath   string
 	// Session lifetime in hours
 	SessionLifetimeHours int
+}
+
+func init() {
+	gob.Register(User{})
 }
 
 // GetName is a helper function that sets the user blank if User is nil
@@ -103,20 +103,24 @@ func validRole(role string) bool {
 }
 
 func (db *DB) getDB() *bolt.DB {
-	var err error
-	db.authdb, err = bolt.Open(db.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
-	if err != nil {
-		log.Fatalln("Error opening auth.DB in getDB()", err)
-		return nil
-	}
+	/*
+		var err error
+		db.authdb, err = bolt.Open(db.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+		if err != nil {
+			log.Fatalln("Error opening auth.DB in getDB()", err)
+			return nil
+		}
+	*/
 	return db.authdb
 }
 
 func (db *DB) releaseDB() {
-	err := db.authdb.Close()
-	if err != nil {
-		log.Fatalln("Error closing auth.db in releaseDB()", err)
-	}
+	/*
+		err := db.authdb.Close()
+		if err != nil {
+			log.Fatalln("Error closing auth.db in releaseDB()", err)
+		}
+	*/
 }
 
 // NewAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
@@ -143,15 +147,32 @@ func NewAuthStateWithDB(db *DB, cfg Config) *State {
 		cfg.SessionLifetimeHours = 24
 	}
 
+	var err error
+	db.authdb, err = bolt.Open(db.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		log.Fatalln("Error opening auth.DB in getDB()", err)
+		return nil
+	}
+
 	db.dbInit()
 
+	// scs
+	sessionManager := scs.New()
+	sessionManager.Lifetime = time.Duration(cfg.SessionLifetimeHours) * time.Hour
+	sessionManager.Store = boltstore.New(db.authdb)
+
 	state := &State{
-		cookie: securecookie.New(db.getAuthInfo()),
-		DB:     *db,
-		Cfg:    cfg,
+		sm:  sessionManager,
+		DB:  *db,
+		Cfg: cfg,
 	}
 
 	return state
+}
+
+// Wrapping scs middleware
+func (s *State) LoadAndSave(next http.Handler) http.Handler {
+	return s.sm.LoadAndSave(next)
 }
 
 // RandBytes generates a random amount of bytes given a specified length
@@ -186,6 +207,7 @@ func CheckPasswordHash(hash, password []byte) error {
 	return bcrypt.CompareHashAndPassword(hash, password)
 }
 
+/*
 // SetSession Takes a key, and a value to store inside a cookie
 // Currently used for user info and related flash messages
 func (state *State) setSession(key, val string, w http.ResponseWriter) {
@@ -204,101 +226,48 @@ func (state *State) setSession(key, val string, w http.ResponseWriter) {
 	}
 
 }
+*/
 
 // SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
 //   middleware, pushes the message into context and then template
-func (state *State) SetFlash(msg string, w http.ResponseWriter) {
-	state.setSession(cookieFlash, msg, w)
+func (state *State) SetFlash(msg string, r *http.Request) {
+	state.sm.Put(r.Context(), cookieFlash, msg)
 }
 
 // Login generates a random session ID, throws that into the DB,
 //   then sets that session ID into the cookie
-func (state *State) Login(username string, w http.ResponseWriter) {
+func (state *State) Login(username string, r *http.Request) {
 	user := state.DB.getUserInfo(username)
-	sessionID := state.PutSessionID(user)
-	state.setSession(cookieUser, sessionID, w)
-}
-
-func (state *State) readSession(key string, r *http.Request) (value string) {
-	if cookie, err := r.Cookie(key); err == nil {
-		err := state.cookie.Decode(key, cookie.Value, &value)
-		if err != nil {
-			log.Println("Error decoding cookie value for", key, err)
-		}
-	} else if err != http.ErrNoCookie {
-		log.Println("Error reading cookie", key, err)
-	}
-	return value
-}
-
-// ClearSession currently only clearing the user value
-// The CSRF token should always be around due to the login form and such
-func (state *State) clearSession(key string, w http.ResponseWriter) {
-	//state.SetSession(key, "", w, r)
-	cookie := &http.Cookie{
-		Name:     key,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		Expires:  time.Now().Add(-7 * 24 * time.Hour),
-		HttpOnly: true,
-	}
-	http.SetCookie(w, cookie)
-}
-
-func (state *State) clearFlash(w http.ResponseWriter) {
-	state.clearSession(cookieFlash, w)
+	state.sm.Put(r.Context(), cookieUser, user)
 }
 
 // GetRedirect returns the URL from the redirect cookie
-func (state *State) GetRedirect(r *http.Request, w http.ResponseWriter) (redirURL string) {
-	redirURL = state.readSession(cookieRedirect, r)
-	if redirURL != "" {
-		state.clearSession(cookieRedirect, w)
-	}
+func (state *State) GetRedirect(r *http.Request) string {
+	redirURL := state.sm.PopString(r.Context(), cookieRedirect)
 	return redirURL
 }
 
 // IsLoggedIn simply tries to fetch a session ID from the request
 //   If more user info is required, use GetUser()
 func (state *State) IsLoggedIn(r *http.Request) bool {
-	sessionID := state.readSession(cookieUser, r)
-	if sessionID == "" {
-		//log.Println("No session ID in cookie")
-		return false
-	}
-	user := state.GetSessionUser(sessionID)
-	if user == nil {
-		//log.Println("Invalid session ID given")
-		return false
-	}
-	return true
+	return state.sm.Exists(r.Context(), cookieUser)
 }
 
 // GetUserState returns a *User given a session ID cookie inside the request
 func (state *State) GetUser(r *http.Request) *User {
-	sessionID := state.readSession(cookieUser, r)
-	if sessionID == "" {
-		//log.Println("No session ID in cookie")
-		return nil
-	}
 
-	//log.Println("GetUser session ID:", sessionID)
-
-	user := state.GetSessionUser(sessionID)
-	if user == nil {
+	user, ok := state.sm.Get(r.Context(), cookieUser).(User)
+	if !ok {
 		//log.Println("Invalid session ID given")
 		return nil
 	}
-	return user
+
+	return &user
 }
 
-// GetFlash retrieves token from context
-func (state *State) GetFlash(r *http.Request, w http.ResponseWriter) string {
-	message := state.readSession(cookieFlash, r)
-	if message != "" {
-		state.clearFlash(w)
-	}
+// GetFlash retrieves flash message
+func (state *State) GetFlash(r *http.Request) string {
+	message := state.sm.PopString(r.Context(), cookieFlash)
 	return message
 }
 
@@ -416,9 +385,7 @@ func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
 
 // LogoutHandler clears the "user" cookie, logging the user out
 func (state *State) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	sessionID := state.readSession(cookieUser, r)
-	state.DB.DeleteSessionID(sessionID)
-	state.clearSession(cookieUser, w)
+	state.sm.Remove(r.Context(), cookieUser)
 	http.Redirect(w, r, r.Referer(), http.StatusFound)
 }
 
@@ -555,7 +522,7 @@ func (db *DB) UpdatePass(username string, hash []byte) error {
 // Redirect throws the r.URL.Path into a cookie named "redirect" and redirects to the login page
 func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	// Save URL in cookie for later use
-	state.setSession(cookieRedirect, r.URL.Path, w)
+	state.sm.Put(r.Context(), cookieRedirect, r.URL.Path)
 	// Redirect to the login page, should be at LoginPath
 	http.Redirect(w, r, state.Cfg.LoginPath, http.StatusSeeOther)
 }
@@ -592,7 +559,7 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
 			//log.Println(user.Name + " attempting to access " + r.URL.Path)
-			state.SetFlash("Sorry, you are not allowed to see that.", w)
+			state.SetFlash("Sorry, you are not allowed to see that.", r)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -611,7 +578,7 @@ func (state *State) AuthAdminMiddleHandler(next http.Handler) http.Handler {
 		//If user is not an Admin, just redirect to index
 		if !user.IsAdmin() {
 			//log.Println(user.Name + " attempting to access " + r.URL.Path)
-			state.SetFlash("Sorry, you are not allowed to see that.", w)
+			state.SetFlash("Sorry, you are not allowed to see that.", r)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -636,11 +603,6 @@ func (db *DB) dbInit() {
 		}
 
 		_, err = tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-
-		_, err = tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
 		}
@@ -832,259 +794,4 @@ func (state *State) AnyUsers() bool {
 	}
 
 	return anyUsers
-}
-
-// PutSessionID generates a session ID and ties the ID to the given User
-func (state *State) PutSessionID(user *User) string {
-	sessionID := randString(128)
-	//log.Println("PutSessionID session ID for", user.Name, ":", sessionID)
-	boltDB := state.DB.getDB()
-	defer state.DB.releaseDB()
-
-	// session lifetime, should be hours:
-	lifetime := time.Duration(state.Cfg.SessionLifetimeHours) * time.Hour
-
-	expirationTime := time.Now().Add(lifetime).Unix()
-
-	err := boltDB.Update(func(tx *bolt.Tx) error {
-		sessionsBucket, err := tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-
-		encoded, err := json.Marshal(Token{
-			User:           *user,
-			ExpirationTime: int(expirationTime),
-		})
-		if err != nil {
-			return err
-		}
-
-		err = sessionsBucket.Put([]byte(sessionID), encoded)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Fatalln("auth.PutSessionID() Boltdb error:", err)
-	}
-	return sessionID
-}
-
-// GetSessionUser checks for a given session ID in the DB and returns the associated User
-func (db *DB) GetSessionUser(sessionID string) *User {
-	boltDB := db.getDB()
-
-	var tokenByte []byte
-	noSessionID := errors.New("session ID does not exist")
-
-	err := boltDB.View(func(tx *bolt.Tx) error {
-
-		b := tx.Bucket([]byte(sessionIDsBucketName))
-		v := b.Get([]byte(sessionID))
-		if v == nil {
-			return noSessionID
-		}
-		tokenByte = make([]byte, len(v))
-		copy(tokenByte, v)
-		return nil
-	})
-	db.releaseDB()
-	if err == noSessionID {
-		return nil
-	}
-	if err != nil {
-		log.Println("auth.GetSessionUser() Boltdb error:", err)
-		return nil
-	}
-
-	// decode User
-	var decodedToken Token
-	err = json.Unmarshal(tokenByte, &decodedToken)
-	if err != nil {
-		log.Println("error decoding user:", err)
-		return nil
-	}
-
-	if int(time.Now().Unix()) > decodedToken.ExpirationTime {
-		//log.Println("token has expired! Deleting session ID")
-		db.DeleteSessionID(sessionID)
-	}
-
-	return &decodedToken.User
-}
-
-// DeleteSessionID deletes a given session ID
-func (db *DB) DeleteSessionID(sessionID string) {
-	boltDB := db.getDB()
-	defer db.releaseDB()
-
-	err := boltDB.Update(func(tx *bolt.Tx) error {
-		sessionsBucket, err := tx.CreateBucketIfNotExists([]byte(sessionIDsBucketName))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-		err = sessionsBucket.Delete([]byte(sessionID))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Fatalln("auth.DeleteSessionID() Boltdb error:", err)
-	}
-}
-
-// ListSessions lists all sessions in the DB
-func (db *DB) ListSessions() ([]string, error) {
-	boltdb := db.getDB()
-	defer db.releaseDB()
-
-	var sessionIDlist []string
-	err := boltdb.View(func(tx *bolt.Tx) error {
-		sessionBucket := tx.Bucket([]byte(sessionIDsBucketName))
-		err := sessionBucket.ForEach(func(key, value []byte) error {
-			//fmt.Printf("A %s is %s.\n", key, value)
-			id := string(key)
-			sessionIDlist = append(sessionIDlist, id)
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	return sessionIDlist, err
-}
-
-// GetSessionToken checks for a given session ID in the DB and returns the associated Token struct
-func (db *DB) GetSessionToken(sessionID string) *Token {
-	boltDB := db.getDB()
-
-	var tokenByte []byte
-	noSessionID := errors.New("session ID does not exist")
-
-	err := boltDB.View(func(tx *bolt.Tx) error {
-
-		b := tx.Bucket([]byte(sessionIDsBucketName))
-		v := b.Get([]byte(sessionID))
-		if v == nil {
-			return noSessionID
-		}
-		tokenByte = make([]byte, len(v))
-		copy(tokenByte, v)
-		return nil
-	})
-	db.releaseDB()
-	if err == noSessionID {
-		return nil
-	}
-	if err != nil {
-		log.Println("auth.GetSessionUser() Boltdb error:", err)
-		return nil
-	}
-
-	// decode Token
-	var decodedToken Token
-	err = json.Unmarshal(tokenByte, &decodedToken)
-	if err != nil {
-		log.Println("error decoding user:", err)
-		return nil
-	}
-
-	return &decodedToken
-}
-
-func (db *DB) expireSessions() {
-	boltdb := db.getDB()
-
-	var expired [][]byte
-
-	err := boltdb.View(func(tx *bolt.Tx) error {
-		sessionBucket := tx.Bucket([]byte(sessionIDsBucketName))
-		err := sessionBucket.ForEach(func(key, value []byte) error {
-			var sessID Token
-			err := json.Unmarshal(value, &sessID)
-			if err != nil {
-				log.Println("error decoding token json", err)
-				return err
-			}
-
-			if int(time.Now().Unix()) > sessID.ExpirationTime {
-				expired = append(expired, key)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-
-	db.releaseDB()
-
-	if err != nil {
-		log.Println("expireSessions() boltdb error:", err)
-		return
-	}
-
-	for _, token := range expired {
-		//log.Println("deleting session", string(token))
-		db.DeleteSessionID(string(token))
-	}
-
-}
-
-func (s *State) StartCleanup() {
-	stopCleanup := make(chan bool)
-	ticker := time.NewTicker(5 * time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			//log.Println("expiring sessions...")
-			s.DB.expireSessions()
-		case <-stopCleanup:
-			ticker.Stop()
-			return
-		}
-	}
-}
-
-// Refresh tokens if they're near expiration, currently half the configured lifetime hours
-func (s *State) RefreshTokens(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sessionID := s.readSession(cookieUser, r)
-		if sessionID == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		sessionToken := s.DB.GetSessionToken(sessionID)
-		if sessionToken == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// Refresh time should be half the configured lifetime hours
-		refreshTime := time.Duration(s.Cfg.SessionLifetimeHours/2) * time.Hour
-
-		if int(time.Now().Add(refreshTime).Unix()) > sessionToken.ExpirationTime {
-
-			//log.Println("refreshing token", sessionID)
-
-			newSessionID := s.PutSessionID(&sessionToken.User)
-
-			s.setSession(cookieUser, newSessionID, w)
-
-			// Serve before deleting from the database
-			next.ServeHTTP(w, r)
-
-			s.DB.DeleteSessionID(sessionID)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }
