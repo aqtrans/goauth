@@ -28,12 +28,9 @@ const (
 	ChkKey key = 3
 	// Buckets for boltDB
 	authInfoBucketName     = "AuthInfo"
-	hashKeyName            = "HashKey"
-	blockKeyName           = "BlockKey"
 	csrfKeyName            = "CSRFKey"
 	userInfoBucketName     = "Users"
 	registerKeysBucketName = "RegisterKeys"
-	sessionIDsBucketName   = "SessionIDs"
 	// Available roles for users
 	RoleAdmin = "admin"
 	RoleUser  = "user"
@@ -207,27 +204,6 @@ func CheckPasswordHash(hash, password []byte) error {
 	return bcrypt.CompareHashAndPassword(hash, password)
 }
 
-/*
-// SetSession Takes a key, and a value to store inside a cookie
-// Currently used for user info and related flash messages
-func (state *State) setSession(key, val string, w http.ResponseWriter) {
-
-	if encoded, err := state.cookie.Encode(key, val); err == nil {
-		cookie := &http.Cookie{
-			Name:     key,
-			Value:    encoded,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
-		}
-		http.SetCookie(w, cookie)
-	} else {
-		log.Println("Error encoding cookie "+key+" value", err)
-	}
-
-}
-*/
-
 // SetFlash sets a flash message inside a cookie, which, combined with the UserEnvMiddle
 //   middleware, pushes the message into context and then template
 func (state *State) SetFlash(msg string, r *http.Request) {
@@ -238,6 +214,11 @@ func (state *State) SetFlash(msg string, r *http.Request) {
 //   then sets that session ID into the cookie
 func (state *State) Login(username string, r *http.Request) {
 	user := state.DB.getUserInfo(username)
+	err := state.sm.RenewToken(r.Context())
+	if err != nil {
+		log.Println("error renewing token:", err)
+		return
+	}
 	state.sm.Put(r.Context(), cookieUser, user)
 }
 
@@ -361,26 +342,6 @@ func (db *DB) getUserInfo(username string) *User {
 	}
 	return &u
 
-}
-
-func (db *DB) getAuthInfo() (hashkey, blockkey []byte) {
-	boltDB := db.getDB()
-	defer db.releaseDB()
-
-	err := boltDB.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(authInfoBucketName))
-		v1 := b.Get([]byte(hashKeyName))
-		v2 := b.Get([]byte(blockKeyName))
-		hashkey = make([]byte, len(v1))
-		blockkey = make([]byte, len(v2))
-		copy(hashkey, v1)
-		copy(blockkey, v2)
-		return nil
-	})
-	if err != nil {
-		log.Fatalln("Boltdb error in getAuthInfo():", err)
-	}
-	return hashkey, blockkey
 }
 
 // LogoutHandler clears the "user" cookie, logging the user out
@@ -605,32 +566,6 @@ func (db *DB) dbInit() {
 		_, err = tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
-		}
-
-		hashKey := infobucket.Get([]byte(hashKeyName))
-		if hashKey == nil {
-			//log.Println("Throwing hashkey into auth.db.")
-			// Generate a random hashKey
-			hashKey := randBytes(64)
-
-			err = infobucket.Put([]byte(hashKeyName), hashKey)
-			if err != nil {
-				log.Println("Error putting hashkey into auth.db:", err)
-				return err
-			}
-		}
-
-		blockKey := infobucket.Get([]byte(blockKeyName))
-		if blockKey == nil {
-			//log.Println("Throwing blockkey into auth.db.")
-			// Generate a random blockKey
-			blockKey := randBytes(32)
-
-			err = infobucket.Put([]byte(blockKeyName), blockKey)
-			if err != nil {
-				log.Println("Error putting blockey into auth.db:", err)
-				return err
-			}
 		}
 
 		csrfKey := infobucket.Get([]byte(csrfKeyName))
