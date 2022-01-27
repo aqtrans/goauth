@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"git.jba.io/go/auth"
+	"git.jba.io/go/auth/v2"
 )
 
 //UserSignupTokenPostHandler only handles POST requests, using forms named "username", "password", and "register_key"
@@ -32,7 +32,7 @@ func (e *env) UserSignupTokenPostHandler(w http.ResponseWriter, r *http.Request)
 				err := e.authState.NewAdmin(username, password)
 				if err != nil {
 					log.Println("Error adding admin:", err)
-					e.authState.SetFlash("Error adding user. Check logs.", w)
+					e.authState.SetFlash("Error adding user. Check logs.", r)
 					http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 					return
 				}
@@ -40,7 +40,7 @@ func (e *env) UserSignupTokenPostHandler(w http.ResponseWriter, r *http.Request)
 				err := e.authState.NewUser(username, password)
 				if err != nil {
 					log.Println("Error adding user:", err)
-					e.authState.SetFlash("Error adding user. Check logs.", w)
+					e.authState.SetFlash("Error adding user. Check logs.", r)
 					http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 					return
 				}
@@ -48,13 +48,13 @@ func (e *env) UserSignupTokenPostHandler(w http.ResponseWriter, r *http.Request)
 
 			// Login the recently added user
 			if e.authState.Auth(username, password) {
-				e.authState.Login(username, w)
+				e.authState.Login(username, r)
 			}
 
-			e.authState.SetFlash("Successfully added '"+username+"' user.", w)
+			e.authState.SetFlash("Successfully added '"+username+"' user.", r)
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 		} else {
-			e.authState.SetFlash("Registration token is invalid.", w)
+			e.authState.SetFlash("Registration token is invalid.", r)
 			http.Redirect(w, r, "/", http.StatusInternalServerError)
 		}
 
@@ -80,10 +80,10 @@ func (e *env) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Login authentication
 		if e.authState.Auth(username, password) {
-			e.authState.Login(username, w)
-			e.authState.SetFlash("User '"+username+"' successfully logged in.", w)
+			e.authState.Login(username, r)
+			e.authState.SetFlash("User '"+username+"' successfully logged in.", r)
 			// Check if we have a redirect URL in the cookie, if so redirect to it
-			redirURL := e.authState.GetRedirect(r, w)
+			redirURL := e.authState.GetRedirect(r)
 			if redirURL != "" {
 				http.Redirect(w, r, redirURL, http.StatusSeeOther)
 				return
@@ -91,7 +91,7 @@ func (e *env) LoginPostHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
-		e.authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+		e.authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", r)
 		http.Redirect(w, r, e.authState.Cfg.LoginPath, http.StatusSeeOther)
 		return
 	case "PUT":
@@ -125,17 +125,17 @@ func (e *env) UserSignupPostHandler(w http.ResponseWriter, r *http.Request) {
 		err := e.authState.NewUser(username, password)
 		if err != nil {
 			log.Println("Error adding user:", err)
-			e.authState.SetFlash("Error adding user. Check logs.", w)
+			e.authState.SetFlash("Error adding user. Check logs.", r)
 			http.Redirect(w, r, r.Referer(), http.StatusInternalServerError)
 			return
 		}
 
 		// Login the recently added user
 		if e.authState.Auth(username, password) {
-			e.authState.Login(username, w)
+			e.authState.Login(username, r)
 		}
 
-		e.authState.SetFlash("Successfully added '"+username+"' user.", w)
+		e.authState.SetFlash("Successfully added '"+username+"' user.", r)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 
 	case "PUT":

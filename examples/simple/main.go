@@ -11,7 +11,7 @@ import (
 	"log"
 	"net/http"
 
-	"git.jba.io/go/auth"
+	"git.jba.io/go/auth/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -25,7 +25,7 @@ func (e *env) indexHandler(w http.ResponseWriter, r *http.Request) {
 	// AnyUsers() tests if there are any existing users. Useful for initial signup flows.
 	if !e.authState.AnyUsers() {
 		log.Println("Need to signup...")
-		e.authState.SetFlash("Welcome! Sign up to start creating and editing pages.", w)
+		e.authState.SetFlash("Welcome! Sign up to start creating and editing pages.", r)
 		http.Redirect(w, r, "/signup", http.StatusSeeOther)
 		return
 	}
@@ -36,7 +36,7 @@ func (e *env) indexHandler(w http.ResponseWriter, r *http.Request) {
 		username = user.Name
 	}
 
-	flashmsg := e.authState.GetFlash(r, w)
+	flashmsg := e.authState.GetFlash(r)
 
 	w.Write([]byte(`
 	<html>
@@ -50,7 +50,7 @@ func (e *env) indexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *env) signupHandler(w http.ResponseWriter, r *http.Request) {
-	flashmsg := e.authState.GetFlash(r, w)
+	flashmsg := e.authState.GetFlash(r)
 	w.Write([]byte(`
 	<html>
 	<body>
@@ -66,7 +66,7 @@ func (e *env) signupHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (e *env) loginHandler(w http.ResponseWriter, r *http.Request) {
-	flashmsg := e.authState.GetFlash(r, w)
+	flashmsg := e.authState.GetFlash(r)
 	w.Write([]byte(`
 	<html>
 	<body>
@@ -95,11 +95,11 @@ func (e *env) loginPostHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Login authentication
 		if e.authState.Auth(username, password) {
-			e.authState.Login(username, w)
-			e.authState.SetFlash("User '"+username+"' successfully logged in.", w)
+			e.authState.Login(username, r)
+			e.authState.SetFlash("User '"+username+"' successfully logged in.", r)
 
 			// Check if we have a redirect URL in the cookie, if so redirect to it
-			redirURL := e.authState.GetRedirect(r, w)
+			redirURL := e.authState.GetRedirect(r)
 			if redirURL != "" {
 				http.Redirect(w, r, redirURL, http.StatusSeeOther)
 				return
@@ -107,7 +107,7 @@ func (e *env) loginPostHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
-		e.authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", w)
+		e.authState.SetFlash("User '"+username+"' failed to login. Please check your credentials and try again.", r)
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	case "PUT":
@@ -128,8 +128,6 @@ func main() {
 		authState: *a,
 	}
 
-	go a.StartCleanup()
-
 	// Set flash message
 	//authState.SetFlash("Flash message test...")
 
@@ -137,7 +135,7 @@ func main() {
 	//authState.DB.NewAdmin("admin", "test")
 
 	r := chi.NewRouter()
-	r.Use(a.RefreshTokens)
+	r.Use(a.LoadAndSave)
 	r.Use(middleware.Logger)
 	r.Use(middleware.RequestID)
 
@@ -152,5 +150,6 @@ func main() {
 
 	r.Get("/logout", e.authState.LogoutHandler)
 
+	log.Println("listening on http://127.0.0.1:5000")
 	http.ListenAndServe("127.0.0.1:5000", r)
 }
