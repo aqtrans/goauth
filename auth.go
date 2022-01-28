@@ -461,19 +461,8 @@ func Redirect(state *State, w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, state.Cfg.LoginPath, http.StatusSeeOther)
 }
 
-// AuthMiddle is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
-func (state *State) AuthMiddle(next http.HandlerFunc) http.HandlerFunc {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		if !state.IsLoggedIn(r) {
-			Redirect(state, w, r)
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// AuthMiddleHandler is a middleware to protect a given handler; users only access
-func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
+// UsersOnly is a middleware for HandlerFunc-specific stuff, to protect a given handler; users only access
+func (state *State) UsersOnly(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !state.IsLoggedIn(r) {
 			Redirect(state, w, r)
@@ -482,8 +471,18 @@ func (state *State) AuthMiddleHandler(next http.Handler) http.Handler {
 	})
 }
 
-// AuthAdminMiddle is a middleware to protect a given handler; admin only access
-func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
+// UsersOnlyH is a middleware to protect a given handler; users only access
+func (state *State) UsersOnlyH(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !state.IsLoggedIn(r) {
+			Redirect(state, w, r)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// AdminsOnly is a middleware to protect a given handler; admin only access
+func (state *State) AdminsOnly(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := state.GetUser(r)
 		//if username == "" {
@@ -501,8 +500,8 @@ func (state *State) AuthAdminMiddle(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
-// AuthAdminMiddleHandler is a middleware to protect a given handler; admin only access
-func (state *State) AuthAdminMiddleHandler(next http.Handler) http.Handler {
+// AdminsOnlyH is a middleware to protect a given handler; admin only access
+func (state *State) AdminsOnlyH(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := state.GetUser(r)
 		//if username == "" {

@@ -418,12 +418,12 @@ func TestAuthMiddle1(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.LoadAndSave(authState.AuthMiddle(test))
+	handler := authState.LoadAndSave(authState.UsersOnly(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") == authState.Cfg.LoginPath {
 		t.Log(w2.Result().Header)
-		t.Error("AuthMiddle redirected to /login even after successful login.")
+		t.Error("UsersOnly redirected to /login even after successful login.")
 	}
 
 	/*
@@ -471,11 +471,11 @@ func TestAuthMiddle2(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.LoadAndSave(authState.AuthMiddle(test))
+	handler := authState.LoadAndSave(authState.UsersOnly(test))
 	handler.ServeHTTP(w2, r2)
 
 	if w2.Result().StatusCode != http.StatusOK {
-		t.Error("AuthMiddle did not allow us through")
+		t.Error("UsersOnly did not allow us through")
 	}
 
 }
@@ -547,12 +547,12 @@ func TestAuthAdminMiddle2(t *testing.T) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.LoadAndSave(authState.AuthAdminMiddle(test))
+	handler := authState.LoadAndSave(authState.AdminsOnly(test))
 	handler.ServeHTTP(w2, request2)
 
 	if w2.Header().Get("Location") != "/" {
 		t.Log(w2.Result().Header)
-		t.Error("AuthAdminMiddle did not redirect to / when user tried to access protected page.")
+		t.Error("AdminsOnly did not redirect to / when user tried to access protected page.")
 	}
 }
 
@@ -663,7 +663,7 @@ func BenchmarkAuthMiddle(b *testing.B) {
 		w.Write([]byte("omg"))
 	})
 
-	handler := authState.AuthMiddle(test)
+	handler := authState.LoadAndSave(authState.UsersOnly(test))
 
 	for i := 0; i < b.N; i++ {
 		handler.ServeHTTP(w, r)
