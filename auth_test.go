@@ -556,43 +556,6 @@ func TestAuthAdminMiddle2(t *testing.T) {
 	}
 }
 
-func TestRegisterKey(t *testing.T) {
-	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb.DbPath)
-
-	token := authState.GenerateRegisterToken("admin")
-	valid, role := authState.ValidateRegisterToken(token)
-	if !valid {
-		t.Error("Generated register token is not valid.")
-	}
-	if role != "admin" {
-		t.Error("Generated token not reporting as an admin token.")
-	}
-
-	authState.DeleteRegisterToken(token)
-	valid2, _ := authState.ValidateRegisterToken(token)
-	if valid2 {
-		t.Error("Token is still valid after being deleted.")
-	}
-}
-
-func TestRegisterKey2(t *testing.T) {
-	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb.DbPath)
-
-	token := authState.GenerateRegisterToken("Admin")
-	// Test to make sure that invalid roles fallback to user
-	valid, role := authState.ValidateRegisterToken(token)
-	if !valid {
-		t.Error("Generated register token is not valid.")
-	}
-	if role != "user" {
-		t.Error("Generated token not reporting as an user token.")
-	}
-}
-
 func TestUserGetName(t *testing.T) {
 	u := &User{}
 	name := u.GetName()

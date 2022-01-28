@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
 	"encoding/gob"
 	"errors"
 	"fmt"
@@ -15,35 +14,19 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type key int
-
 const (
-	// UserKey is used to store the *User in the context
-	UserKey key = 1
-	// MsgKey is used to store flash messages in the context
-	MsgKey key = 2
-	// ChkKey is used to store whether UserEnvMiddle has been hit in the context
-	ChkKey key = 3
 	// Buckets for boltDB
-	authInfoBucketName     = "AuthInfo"
-	csrfKeyName            = "CSRFKey"
-	userInfoBucketName     = "Users"
-	registerKeysBucketName = "RegisterKeys"
+	userInfoBucketName = "Users"
 	// Available roles for users
 	RoleAdmin = "admin"
 	RoleUser  = "user"
 	// Names of cookies used
 	cookieUser     = "user"
 	cookieFlash    = "flash"
-	cookieState    = "state"
 	cookieRedirect = "redirect"
 )
 
 var (
-	// LoginPath is the path to the login page, used to redirect protected pages
-	//LoginPath = "/login"
-	// SignupPath is the path to your signup page, used in the initial registration banner
-	//SignupPath          = "/signup"
 	errUserDoesNotExist = errors.New("User does not exist")
 )
 
@@ -157,27 +140,6 @@ func NewAuthStateWithDB(db *DB, cfg Config) *State {
 // Wrapping scs middleware
 func (s *State) LoadAndSave(next http.Handler) http.Handler {
 	return s.sm.LoadAndSave(next)
-}
-
-// RandBytes generates a random amount of bytes given a specified length
-func randBytes(n int) []byte {
-	b := make([]byte, n)
-	_, err := rand.Read(b)
-	// Note that err == nil only if we read len(b) bytes.
-	if err != nil {
-		log.Fatalln("Error generating random bytes:", err)
-		return nil
-	}
-	return b
-}
-
-func randString(n int) string {
-	const letters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-"
-	bytes := randBytes(n)
-	for i, b := range bytes {
-		bytes[i] = letters[b%byte(len(letters))]
-	}
-	return string(bytes)
 }
 
 // HashPassword generates a bcrypt hash of the password using work factor 14.
@@ -527,96 +489,10 @@ func (db *DB) dbInit() {
 			return fmt.Errorf("create bucket: %s", err)
 		}
 
-		_, err = tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-
 		return nil
 	})
 	if err != nil {
 		log.Fatalln("Error in dbInit():", err)
-	}
-}
-
-// GenerateRegisterToken generates a token to register a user, and only a user
-func (db *DB) GenerateRegisterToken(role string) string {
-	switch role {
-	case RoleAdmin, RoleUser:
-	default:
-		role = RoleUser
-	}
-
-	token := randString(12)
-
-	err := db.authdb.Update(func(tx *bolt.Tx) error {
-		registerBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-		err = registerBucket.Put([]byte(token), []byte(role))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Fatalln("GenerateRegisterToken() Boltdb error:", err)
-	}
-	return token
-}
-
-// ValidateRegisterToken validates that a given registration token is valid, exists inside the DB
-func (db *DB) ValidateRegisterToken(token string) (bool, string) {
-
-	var userRole []byte
-
-	invalidToken := errors.New("token does not exist")
-
-	err := db.authdb.View(func(tx *bolt.Tx) error {
-
-		// Check if no users exist and token is blank. If so, bypass token check
-		userbucket := tx.Bucket([]byte(userInfoBucketName))
-		if userbucket.Stats().KeyN == 0 && token == "" {
-			return nil
-		}
-
-		b := tx.Bucket([]byte(registerKeysBucketName))
-		v := b.Get([]byte(token))
-		if v == nil {
-			return invalidToken
-		}
-		userRole = make([]byte, len(v))
-		copy(userRole, v)
-		return nil
-	})
-
-	if err == invalidToken {
-		return false, ""
-	}
-	if err != nil && err != invalidToken {
-		log.Fatalln("ValidateRegisterToken() Boltdb error:", err)
-	}
-
-	return true, string(userRole)
-}
-
-// DeleteRegisterToken deletes a registration token
-func (db *DB) DeleteRegisterToken(token string) {
-
-	err := db.authdb.Update(func(tx *bolt.Tx) error {
-		registerBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
-		if err != nil {
-			return fmt.Errorf("create bucket: %s", err)
-		}
-		err = registerBucket.Delete([]byte(token))
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Fatalln("DeleteRegisterToken() Boltdb error:", err)
 	}
 }
 

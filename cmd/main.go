@@ -5,7 +5,7 @@ import (
 
 	"log"
 
-	"git.jba.io/go/auth"
+	"git.jba.io/go/auth/v2"
 	"github.com/spf13/cobra"
 )
 
