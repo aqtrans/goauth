@@ -593,41 +593,6 @@ func TestRegisterKey2(t *testing.T) {
 	}
 }
 
-func TestGetCSRFKey(t *testing.T) {
-	tmpdb := tempfile()
-	authState := NewAuthState(tmpdb)
-	defer os.Remove(tmpdb.DbPath)
-
-	csrfKey := authState.getCSRFKey()
-	if len(csrfKey) == 0 {
-		t.Error("getCSRFKey returned a 0 length key.")
-	}
-
-	test := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("omg"))
-	})
-
-	h := authState.CSRFProtect(false)
-	h(test)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-
-	CSRFTemplateField(r)
-	/*
-		if csrf == template.HTML("") {
-			t.Error("CSRFTemplateField is nil")
-		}
-	*/
-
-	w.Write([]byte("User token:" + authState.GenerateRegisterToken("user")))
-	/*
-		if w.Code != http.StatusFound {
-			t.Error("HTTP response code is not 200.", w.Code)
-		}
-	*/
-}
-
 func TestUserGetName(t *testing.T) {
 	u := &User{}
 	name := u.GetName()
