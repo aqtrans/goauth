@@ -99,25 +99,13 @@ func validRole(role string) bool {
 	}
 }
 
-func (db *DB) getDB() *bolt.DB {
-	/*
-		var err error
-		db.authdb, err = bolt.Open(db.path, 0600, &bolt.Options{Timeout: 1 * time.Second})
-		if err != nil {
-			log.Fatalln("Error opening auth.DB in getDB()", err)
-			return nil
-		}
-	*/
-	return db.authdb
-}
+func (state *State) CloseDB() {
 
-func (db *DB) releaseDB() {
-	/*
-		err := db.authdb.Close()
-		if err != nil {
-			log.Fatalln("Error closing auth.db in releaseDB()", err)
-		}
-	*/
+	err := state.DB.authdb.Close()
+	if err != nil {
+		log.Fatalln("Error closing auth.db in CloseDB()", err)
+	}
+
 }
 
 // NewAuthState creates a new AuthState using the BoltDB backend, storing the boltDB connection and cookie info
@@ -271,11 +259,8 @@ func (u *User) IsValid() bool {
 // Auth authenticates a given username and password
 func (db *DB) Auth(username, password string) bool {
 
-	boltdb := db.getDB()
-	defer db.releaseDB()
-
 	// Grab given user's password from Bolt
-	err := boltdb.View(func(tx *bolt.Tx) error {
+	err := db.authdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		if b == nil {
 			return errUserDoesNotExist
@@ -301,10 +286,8 @@ func (db *DB) Auth(username, password string) bool {
 
 // DoesUserExist checks if user actually exists in the DB
 func (db *DB) DoesUserExist(username string) bool {
-	boltdb := db.getDB()
-	defer db.releaseDB()
 
-	err := boltdb.View(func(tx *bolt.Tx) error {
+	err := db.authdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		if b == nil {
 			return errUserDoesNotExist
@@ -323,10 +306,8 @@ func (db *DB) DoesUserExist(username string) bool {
 // GetUserInfo gets a *User from the DB
 func (db *DB) getUserInfo(username string) *User {
 	var u User
-	boltdb := db.getDB()
-	defer db.releaseDB()
 
-	err := boltdb.View(func(tx *bolt.Tx) error {
+	err := db.authdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		if b == nil {
 			return errUserDoesNotExist
@@ -377,10 +358,8 @@ func (db *DB) newUser(username, password, role string) error {
 		return err
 	}
 
-	boltdb := db.getDB()
-	defer db.releaseDB()
 	//var vb []byte
-	adderr := boltdb.Batch(func(tx *bolt.Tx) error {
+	adderr := db.authdb.Batch(func(tx *bolt.Tx) error {
 		masteruserbucket := tx.Bucket([]byte(userInfoBucketName))
 
 		// Check if no users exist. If so, make this one an admin
@@ -421,11 +400,9 @@ func (db *DB) newUser(username, password, role string) error {
 
 // Userlist lists all users in the DB
 func (db *DB) Userlist() ([]string, error) {
-	boltdb := db.getDB()
-	defer db.releaseDB()
 
 	var userList []string
-	err := boltdb.View(func(tx *bolt.Tx) error {
+	err := db.authdb.View(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte(userInfoBucketName))
 		err := userbucket.ForEach(func(key, value []byte) error {
 			//fmt.Printf("A %s is %s.\n", key, value)
@@ -443,10 +420,8 @@ func (db *DB) Userlist() ([]string, error) {
 
 // DeleteUser deletes a given user from the DB
 func (db *DB) DeleteUser(username string) error {
-	boltdb := db.getDB()
-	defer db.releaseDB()
 
-	err := boltdb.Update(func(tx *bolt.Tx) error {
+	err := db.authdb.Update(func(tx *bolt.Tx) error {
 		//log.Println(username + " has been deleted")
 		return tx.Bucket([]byte(userInfoBucketName)).DeleteBucket([]byte(username))
 	})
@@ -459,11 +434,9 @@ func (db *DB) DeleteUser(username string) error {
 // UpdatePass updates a given user's password to the given hash
 // Password hashing must be done by the caller
 func (db *DB) UpdatePass(username string, hash []byte) error {
-	boltdb := db.getDB()
-	defer db.releaseDB()
 
 	// Update password only if user exists
-	err := boltdb.Update(func(tx *bolt.Tx) error {
+	err := db.authdb.Update(func(tx *bolt.Tx) error {
 		userbucket := tx.Bucket([]byte(userInfoBucketName)).Bucket([]byte(username))
 		// userbucket should be nil if user doesn't exist
 		if userbucket == nil {
@@ -548,10 +521,8 @@ func (state *State) AuthAdminMiddleHandler(next http.Handler) http.Handler {
 }
 
 func (db *DB) dbInit() {
-	boltDB := db.getDB()
-	defer db.releaseDB()
 
-	err := boltDB.Update(func(tx *bolt.Tx) error {
+	err := db.authdb.Update(func(tx *bolt.Tx) error {
 
 		_, err := tx.CreateBucketIfNotExists([]byte(userInfoBucketName))
 		if err != nil {
@@ -597,10 +568,8 @@ func (db *DB) GenerateRegisterToken(role string) string {
 	}
 
 	token := randString(12)
-	boltDB := db.getDB()
-	defer db.releaseDB()
 
-	err := boltDB.Update(func(tx *bolt.Tx) error {
+	err := db.authdb.Update(func(tx *bolt.Tx) error {
 		registerBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
@@ -619,14 +588,12 @@ func (db *DB) GenerateRegisterToken(role string) string {
 
 // ValidateRegisterToken validates that a given registration token is valid, exists inside the DB
 func (db *DB) ValidateRegisterToken(token string) (bool, string) {
-	boltDB := db.getDB()
-	defer db.releaseDB()
 
 	var userRole []byte
 
 	invalidToken := errors.New("token does not exist")
 
-	err := boltDB.View(func(tx *bolt.Tx) error {
+	err := db.authdb.View(func(tx *bolt.Tx) error {
 
 		// Check if no users exist and token is blank. If so, bypass token check
 		userbucket := tx.Bucket([]byte(userInfoBucketName))
@@ -656,10 +623,8 @@ func (db *DB) ValidateRegisterToken(token string) (bool, string) {
 
 // DeleteRegisterToken deletes a registration token
 func (db *DB) DeleteRegisterToken(token string) {
-	boltDB := db.getDB()
-	defer db.releaseDB()
 
-	err := boltDB.Update(func(tx *bolt.Tx) error {
+	err := db.authdb.Update(func(tx *bolt.Tx) error {
 		registerBucket, err := tx.CreateBucketIfNotExists([]byte(registerKeysBucketName))
 		if err != nil {
 			return fmt.Errorf("create bucket: %s", err)
@@ -676,12 +641,10 @@ func (db *DB) DeleteRegisterToken(token string) {
 }
 
 func (db *DB) getCSRFKey() []byte {
-	boltDB := db.getDB()
-	defer db.releaseDB()
 
 	var csrfKey []byte
 
-	err := boltDB.View(func(tx *bolt.Tx) error {
+	err := db.authdb.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(authInfoBucketName))
 		v1 := b.Get([]byte(csrfKeyName))
 		csrfKey = make([]byte, len(v1))
@@ -707,12 +670,10 @@ func CSRFTemplateField(r *http.Request) template.HTML {
 // AnyUsers checks if there are any users in the DB
 // This is useful in application initialization flows
 func (state *State) AnyUsers() bool {
-	boltDB := state.DB.getDB()
-	defer state.DB.releaseDB()
 
 	var anyUsers bool
 
-	err := boltDB.View(func(tx *bolt.Tx) error {
+	err := state.DB.authdb.View(func(tx *bolt.Tx) error {
 
 		// Check if no users exist and token is blank. If so, bypass token check
 		userbucket := tx.Bucket([]byte(userInfoBucketName))
