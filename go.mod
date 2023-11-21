@@ -1,4 +1,4 @@
-module git.jba.io/go/auth/v2
+module git.sr.ht/~aqtrans/goauth/v2
 
 require (
 	github.com/alexedwards/scs/boltstore v0.0.0-20211203064041-370cc303b69f
@@ -14,4 +14,4 @@ require (
 	golang.org/x/sys v0.0.0-20220114195835-da31bd327af9 // indirect
 )
 
-go 1.17
+go 1.21
