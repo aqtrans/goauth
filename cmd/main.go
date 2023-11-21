@@ -5,7 +5,7 @@ import (
 
 	"log"
 
-	"git.jba.io/go/auth/v2"
+	auth "git.sr.ht/~aqtrans/goauth/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -23,6 +23,10 @@ func main() {
 	var rootCmd = &cobra.Command{Use: "app"}
 	rootCmd.PersistentFlags().StringVarP(&boltDB, "boltDB", "b", "./auth.db", "Path to the auth.db.")
 
+	var cfg = auth.Config{
+		DbPath: boltDB,
+	}
+
 	var cmdAddUser = &cobra.Command{
 		Use:   "add [username] [password] [role]",
 		Short: "Add a user",
@@ -30,7 +34,7 @@ func main() {
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			//log.Println(args[0], args[1], args[2])
-			authState := auth.NewAuthState(boltDB)
+			authState := auth.NewAuthState(cfg)
 			if args[2] == "admin" {
 				authState.NewAdmin(args[0], args[1])
 			} else if args[2] == "user" {
@@ -46,7 +50,7 @@ func main() {
 		Long:  `List all users in given boltDB.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			//log.Println(args[0], args[1], args[2])
-			authState := auth.NewAuthState(boltDB)
+			authState := auth.NewAuthState(cfg)
 			userList, err := authState.Userlist()
 			if err != nil {
 				log.Println(err)
@@ -55,23 +59,6 @@ func main() {
 		},
 	}
 
-	var cmdGenerateRegistrationKey = &cobra.Command{
-		Use:   "gen [role]",
-		Short: "Generate a registration key",
-		Long:  `Generate a registration key for a user or admin.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			//log.Println(args[0], args[1], args[2])
-			authState := auth.NewAuthState(boltDB)
-			if args[2] == "admin" {
-				authState.GenerateRegisterToken(args[2])
-			} else if args[2] == "user" {
-				authState.GenerateRegisterToken(args[2])
-			} else {
-				log.Fatalln("Invalid role. admin or user only.", args[2])
-			}
-		},
-	}
-
-	rootCmd.AddCommand(cmdAddUser, cmdListUsers, cmdGenerateRegistrationKey)
+	rootCmd.AddCommand(cmdAddUser, cmdListUsers)
 	rootCmd.Execute()
 }
