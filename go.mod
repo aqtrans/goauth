@@ -5,7 +5,7 @@ require (
 	github.com/alexedwards/scs/v2 v2.7.0
 	github.com/spf13/cobra v0.0.5
 	go.etcd.io/bbolt v1.3.8
-	golang.org/x/crypto v0.16.0
+	golang.org/x/crypto v0.17.0
 )
 
 require (
