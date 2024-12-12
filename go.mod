@@ -5,13 +5,13 @@ require (
 	github.com/alexedwards/scs/v2 v2.8.0
 	github.com/spf13/cobra v0.0.5
 	go.etcd.io/bbolt v1.3.10
-	golang.org/x/crypto v0.26.0
+	golang.org/x/crypto v0.31.0
 )
 
 require (
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.3 // indirect
-	golang.org/x/sys v0.24.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
 )
 
 go 1.21
