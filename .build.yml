@@ -3,7 +3,7 @@ packages:
   - go
   - git
 secrets:
-  - 9ef6e07e-cae5-4ec0-b799-8898de1f742b
+  - dfbc7cb0-b02f-44ab-9b11-cf1a5467c3d2
 sources:
   - ssh://git@git.jba.io:go/auth.git
 environment:
