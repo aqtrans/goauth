@@ -3,11 +3,15 @@ packages:
   - go
   - git
 secrets:
-  - 8ad6a3b8-827a-4454-8337-3ec2baab7ca0
+  - 9ef6e07e-cae5-4ec0-b799-8898de1f742b
 sources:
-  - ssh://git@git.sr.ht/~aqtrans/goauth
+  - ssh://git@git.jba.io:go/auth.git
 environment:
-  project: goauth
+  project: auth
+triggers:
+  - action: email
+    condition: failure
+    to: Jordan Anderson <jordan@jba.io>
 tasks:
   - setup: |
       cd ${project}
@@ -15,12 +19,5 @@ tasks:
   - test: |
       cd ${project}
       go test
-      go test -race
       go test -cover
       go test -bench=.
-  - mirror-to-github: |
-      cd ${project}
-      ssh-keyscan -H github.com > $HOME/.ssh/known_hosts
-      echo -e "Host github.com\n    IdentityFile ~/.ssh/id_rsa\n    IdentitiesOnly yes\n    BatchMode yes\n" >> ~/.ssh/config
-      git remote add github git@github.com:aqtrans/goauth.git
-      git push --prune github +refs/remotes/origin/*:refs/heads/* +refs/tags/*:refs/tags/* master
